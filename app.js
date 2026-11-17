@@ -1,8 +1,8 @@
 'use strict';
-/* استلام الخام — العلا · v2.0.0
+/* استلام الخام — العلا · v2.0.1
    كل البيانات على الجهاز ده بس: سجلات العربيات في IndexedDB (rcv_data) + نسخة فورية للمسودة المفتوحة في localStorage،
    والصور في IndexedDB (rcv_photos). السجل القديم rcv_v1 لا يُمسح أبدًا (الإعدادات لسه فيه). */
-const APP_VER='2.0.0';
+const APP_VER='2.0.1';
 const KEY='rcv_v1',MIG='rcv_mig2',OPEN='rcv_open2',LIVE='rcv_live2',FB='rcv_fb2';
 const OR_SIZES=['أكبر من 36','36','40','48','56','64','72','80','88','100','113','أصغر من 113'];
 const VAR=[['navel','برتقال أبوسرة'],['baladi','برتقال بلدي'],['valencia','برتقال صيفي (فالنسيا)'],['murk','موركوت كيني'],['murs','موركوت إسباني']];
@@ -254,6 +254,9 @@ function repData(r){const c=clone(r),R=compute(c,stOf(r)),h=c.h,N=R.N,net=Math.r
 const kgS=x=>Math.round(x).toLocaleString('en')+' كجم',tS=x=>(x/1000).toFixed(2)+' طن';
 function dateOf(r){return fmtLocal(r.h.dt)}
 let PDFC={key:null,p:null,done:null};
+const LH={header:'alola_header.png',footer:'alola_footer.png'};
+const LHIMG={};async function loadLh(){await Promise.all(Object.values(LH).map(async s=>{if(LHIMG[s]!==undefined)return;try{LHIMG[s]=await loadImgEl(s)}catch(e){LHIMG[s]=null}}));return LHIMG}
+
 async function renderReport(r){const D=repData(r),{R,h,N,net}=D;let PH=[];try{PH=await phOf(r.code)}catch(e){}
  const by=k=>PH.filter(p=>p.cause==k);const st=R.st;
  const kpi=(a,b,hl)=>`<div class="${hl?'hl':''}"><small>${a}</small><b>${b||'—'}</b></div>`;
@@ -296,7 +299,7 @@ async function printPdf(id){const r=recById(id);toast('⏳ جاري التجهي
 /* ---------- رسم التقرير على canvas (A4): صفحة البيانات والقرار، وبعدها صفحات الصور ---------- */
 async function renderPages(r,opt={}){const D=repData(r),{R,h,N,net}=D,st=R.st;let PH=[];try{PH=await phOf(r.code)}catch(e){}
  try{await Promise.all(['400','700','800'].map(w=>document.fonts.load(w+' 24px Cairo')))}catch(e){}
- const IM=new Map();await Promise.all(PH.map(async p=>{try{const s=phSrc(p);if(s)IM.set(p.id,await loadImgEl(s))}catch(e){}}));
+ const IM=new Map();await Promise.all(PH.map(async p=>{try{const s=phSrc(p);if(s)IM.set(p.id,await loadImgEl(s))}catch(e){}}));await loadLh();const HDR=LHIMG[LH.header],FTR=LHIMG[LH.footer];
  const W=1240,H=1754,M=44,RX=W-M,CW=W-2*M;const FF='Cairo,"Geeza Pro","Noto Naskh Arabic",Tahoma,sans-serif';
  let x;const font=(s,w)=>{x.font=`${w||400} ${s}px ${FF}`};
  const T=(s,px,py,o={})=>{font(o.s||18,o.w);x.fillStyle=o.c||'#000';x.textAlign=o.a||'right';x.direction=o.d||'rtl';x.textBaseline='alphabetic';x.fillText(String(s??''),px,py,o.max||undefined)};
@@ -313,9 +316,11 @@ async function renderPages(r,opt={}){const D=repData(r),{R,h,N,net}=D,st=R.st;le
    x.strokeStyle='#bbb';x.lineWidth=1;x.beginPath();x.moveTo(rx-w,y+rh);x.lineTo(rx,y+rh);x.stroke();y+=rh});
   box(rx-w,y-rows.length*rh-hh,w,rows.length*rh+hh,1);return y+10}
  /* 1) الورقة الواحدة: بنرسم على canvas طويل وبعدين بنصغّره لو لزم عشان يدخل صفحة A4 واحدة */
- const tall=document.createElement('canvas');tall.width=W;tall.height=3400;x=tall.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,W,3400);let y=M;
- T('العلا لفرز الحاصلات الزراعية',RX,y+22,{s:21,w:700,c:'#333'});T('برعاية شركة الراشد للتجارة',RX,y+44,{s:13.5,c:'#777'});T('تقرير استلام سيارة خام',RX,y+84,{s:32,w:800});
- T(r.code,M,y+26,{s:21,w:700,a:'left',d:'ltr'});T(dateOf(r),M,y+54,{s:19,a:'left',d:'ltr'});T(VN[h.variety]||'',M,y+82,{s:17,a:'left',c:'#333'});x.fillStyle='#000';x.fillRect(M,y+96,CW,3);y+=110;
+ const MM=H/297,HD=HDR?Math.round(HDR.naturalHeight/HDR.naturalWidth*W):Math.round(47.5*MM),FT=FTR?Math.round(FTR.naturalHeight/FTR.naturalWidth*W):Math.round(28*MM);
+ const stamp=(pg,withHd)=>{const c=pg.getContext('2d');if(withHd&&HDR)c.drawImage(HDR,0,0,W,HD);if(FTR)c.drawImage(FTR,0,H-FT,W,FT)};
+ const tall=document.createElement('canvas');tall.width=W;tall.height=3400;x=tall.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,W,3400);let y=8;
+ T('تقرير استلام سيارة خام',RX,y+36,{s:30,w:800});
+ T(r.code,M,y+18,{s:20,w:700,a:'left',d:'ltr'});T(dateOf(r),M,y+44,{s:18,a:'left',d:'ltr'});T(VN[h.variety]||'',M,y+70,{s:16,a:'left',c:'#333'});x.fillStyle='#000';x.fillRect(M,y+82,CW,3);y+=96;
  // البيانات الأساسية
  const K=[['المورّد',h.supplier],['رقم العربية',h.plate],['السواق',h.driver],['المنطقة',h.region],['عدد الصناديق',n(h.crates)?n(h.crates)+' صندوق':''],['متوسط الصندوق',h.avgc?h.avgc+' كجم':''],
   ['الوزن القائم',n(h.gross)?kgS(n(h.gross)):''],['الوزن الفارغ',n(h.tare)?kgS(n(h.tare)):''],['الوزن الصافي',net?kgS(net):'',1],['العينة',N+' ثمرة'+(n(h.sampKg)?' / '+n(h.sampKg)+' كجم':'')],['متوسط وزن الثمرة',R.avgW?f0(R.avgW)+' جم':''],['الجودة',[h.brix&&'بريكس '+h.brix,h.acid&&'حموضة '+h.acid,h.juice&&'عصير '+h.juice,h.color&&'لون '+h.color+'/5'].filter(Boolean).join(' · ')]];
@@ -348,15 +353,18 @@ async function renderPages(r,opt={}){const D=repData(r),{R,h,N,net}=D,st=R.st;le
  y+=40;const f3=CW/3;['مسئول الاستلام','مسئول الجودة','المورد / السائق'].forEach((l,i)=>{const cx=RX-i*f3;x.fillStyle='#000';x.fillRect(cx-f3+30,y,f3-60,1.5);T(l,cx-f3/2,y+24,{s:16,w:700,a:'center'})});y+=40;
  T('الحدود قيم افتراضية قابلة للتعديل في الإعدادات وليست مواصفة رسمية · كل ثمرة مسجلة تحت أكبر عيب فيها · صدر '+fmtTs(r.issuedAt||Date.now()),RX,y+14,{s:12.5,c:'#666'});y+=24;
  const contentH=y;const sheet=document.createElement('canvas');sheet.width=W;sheet.height=H;x=sheet.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,W,H);
- const sc=Math.min(1,(H-16)/contentH);const dw=W*sc;x.drawImage(tall,0,0,W,contentH,(W-dw)/2,8,dw,contentH*sc);tall.width=tall.height=1;
- const pages=[sheet];if(opt.sheetOnly)return pages;
+ const bodyTop=HD+6,bodyBot=H-FT-22,bodyH=Math.max(200,bodyBot-bodyTop);const sc=Math.min(1,bodyH/contentH);const dw=W*sc;
+ x.drawImage(tall,0,0,W,contentH,(W-dw)/2,bodyTop,dw,contentH*sc);tall.width=tall.height=1;
+ const pages=[sheet];if(opt.sheetOnly){stamp(sheet,1);return pages}
  /* 2) صفحات الصور بالحجم الكامل (في ملف الـ PDF بعد الورقة الأساسية) */
- if(PL.length){let pg,yy2;const gw=(CW-20)/2,gh=470;const np=()=>{pg=document.createElement('canvas');pg.width=W;pg.height=H;x=pg.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,W,H);pages.push(pg);T('صور تقرير '+r.code,RX,M+30,{s:24,w:800});T(dateOf(r),M,M+30,{s:18,a:'left',d:'ltr'});x.fillStyle='#000';x.fillRect(M,M+44,CW,2);yy2=M+64};
-  np();let i=0;PL.forEach(p=>{if(yy2+gh+40>H-M){np();i=0}const col=i%2,cx=RX-col*(gw+20);cover(IM.get(p.id),cx-gw,yy2,gw,gh);box(cx-gw,yy2,gw,gh,1);
+ const photoTop=M+8,photoBot=H-FT-22;
+ if(PL.length){let pg,yy2;const gw=(CW-20)/2,gh=470;const np=()=>{pg=document.createElement('canvas');pg.width=W;pg.height=H;x=pg.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,W,H);pages.push(pg);T('صور تقرير '+r.code,RX,photoTop+30,{s:24,w:800});T(dateOf(r),M,photoTop+30,{s:18,a:'left',d:'ltr'});x.fillStyle='#000';x.fillRect(M,photoTop+44,CW,2);yy2=photoTop+64};
+  np();let i=0;PL.forEach(p=>{if(yy2+gh+40>photoBot){np();i=0}const col=i%2,cx=RX-col*(gw+20);cover(IM.get(p.id),cx-gw,yy2,gw,gh);box(cx-gw,yy2,gw,gh,1);
    T((DN[p.cause]||p.cause)+(p.cause!=='truck'?` — ${n(D.c.d[p.cause])} ثمرة (${N?(n(D.c.d[p.cause])/N*100).toFixed(1):0}%)`:''),cx-gw/2,yy2+gh+28,{s:19,w:700,a:'center',max:gw});if(col===1)yy2+=gh+46;i++});
   if(i%2===1){} }
- pages.forEach((p,i)=>{x=p.getContext('2d');if(pages.length>1)T(`صفحة ${i+1} من ${pages.length}`,W/2,H-10,{s:13,c:'#888',a:'center'})});
+ pages.forEach((p,i)=>{x=p.getContext('2d');stamp(p,i===0);if(pages.length>1)T(`صفحة ${i+1} من ${pages.length}`,W/2,H-FT-10,{s:13,c:'#888',a:'center'})});
  return pages}
+
 function makePdf(imgs){const enc=new TextEncoder(),parts=[],off=[];let len=0;const push=b=>{if(typeof b==='string')b=enc.encode(b);parts.push(b);len+=b.length};
  const PW=595.28,PHt=841.89,cnt=2+imgs.length*3;push('%PDF-1.4\n%\u00ff\u00ff\n');
  const obj=(i,body)=>{off[i]=len;push(i+' 0 obj\n');body();push('\nendobj\n')};
