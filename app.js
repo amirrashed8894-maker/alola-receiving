@@ -1,8 +1,8 @@
 'use strict';
-/* استلام الخام — العلا · v2.0.1
+/* استلام الخام — العلا · v2.0.2
    كل البيانات على الجهاز ده بس: سجلات العربيات في IndexedDB (rcv_data) + نسخة فورية للمسودة المفتوحة في localStorage،
    والصور في IndexedDB (rcv_photos). السجل القديم rcv_v1 لا يُمسح أبدًا (الإعدادات لسه فيه). */
-const APP_VER='2.0.1';
+const APP_VER='2.0.2';
 const KEY='rcv_v1',MIG='rcv_mig2',OPEN='rcv_open2',LIVE='rcv_live2',FB='rcv_fb2';
 const OR_SIZES=['أكبر من 36','36','40','48','56','64','72','80','88','100','113','أصغر من 113'];
 const VAR=[['navel','برتقال أبوسرة'],['baladi','برتقال بلدي'],['valencia','برتقال صيفي (فالنسيا)'],['murk','موركوت كيني'],['murs','موركوت إسباني']];
@@ -33,16 +33,60 @@ function loadOld(){try{OLD=JSON.parse(localStorage.getItem(KEY))}catch(e){}if(!O
 function saveSet(){OLD.set=ST;try{localStorage.setItem(KEY,JSON.stringify(OLD))}catch(e){toast('تعذر حفظ الإعدادات: '+e.name)}}
 
 /* ---------- IndexedDB مع إعادة فتح الاتصال تلقائيًا (سفاري الآيفون بيقفل الاتصال لما الكاميرا تفتح أو الشاشة تقفل) ---------- */
-function IDB(name,ver,up){let p=null;
- const open=()=>p||(p=new Promise((ok,no)=>{let r;try{r=indexedDB.open(name,ver)}catch(e){p=null;return no(e)}
-  r.onupgradeneeded=e=>up(r.result,e.oldVersion);
-  r.onsuccess=()=>{const d=r.result;d.onclose=()=>{p=null};d.onversionchange=()=>{try{d.close()}catch(e){}p=null};ok(d)};
-  r.onerror=()=>{p=null;no(r.error)};r.onblocked=()=>{}}));
- async function run(store,mode,fn){let last;for(let a=0;a<3;a++){try{const d=await open();return await new Promise((ok,no)=>{const t=d.transaction(store,mode);const s=t.objectStore(store);let res;const q=fn(s);if(q)q.onsuccess=()=>{res=q.result};t.oncomplete=()=>ok(res);t.onerror=()=>no(t.error||(q&&q.error));t.onabort=()=>no(t.error||new DOMException('abort','AbortError'))})}catch(e){last=e;if(e&&(e.name==='QuotaExceededError'||e.name==='DataCloneError'||e.name==='ConstraintError'))throw e;p=null;await new Promise(r=>setTimeout(r,120*(a+1)))}}throw last}
+/* لو سفاري قافل IndexedDB (زي وضع Lockdown في الآيفون) المتغير indexedDB نفسه مش موجود ← أي استخدام مباشر = ReferenceError.
+   عشان كده: فحص آمن + تخزين بديل للصور (Cache Storage ثم localStorage) والسجلات (localStorage) */
+const HAS_IDB=(()=>{try{return typeof indexedDB!=='undefined'&&!!indexedDB&&typeof indexedDB.open==='function'}catch(e){return false}})();
+let IDB_LAST='';
+function errTxt(e){if(!e)return 'خطأ غير معروف';if(typeof e!=='object')return String(e);const nm=e.name||'Error',m=e.message||'';return m&&m!==nm?nm+': '+m:nm}
+function IDB(name,ver,up,check){let p=null;
+ const noIDB=()=>{const e=new Error('IndexedDB غير متاح في المتصفح ده');e.name='NotSupportedError';return e};
+ const req=v=>new Promise((ok,no)=>{let r,done=false;try{r=v?indexedDB.open(name,v):indexedDB.open(name)}catch(e){return no(e)}
+  const tm=setTimeout(()=>{if(done)return;done=true;const e=new Error('فتح IndexedDB اتأخر/اتعطل (blocked)');e.name='TimeoutError';no(e)},8000);
+  r.onupgradeneeded=e=>{try{up(r.result,e.oldVersion,r.transaction)}catch(x){console.error(x)}};
+  r.onsuccess=()=>{const d=r.result;if(done){try{d.close()}catch(e){}return}done=true;clearTimeout(tm);ok(d)};
+  r.onerror=e=>{try{e&&e.preventDefault&&e.preventDefault()}catch(x){}if(done)return;done=true;clearTimeout(tm);no(r.error||new Error('IndexedDB open error'))};
+  r.onblocked=()=>{}});
+ async function openDb(){if(!HAS_IDB)throw noIDB();let d;
+  try{d=await req(ver)}catch(e){if(e&&e.name==='VersionError')d=await req(0);else throw e}
+  let good=false;try{good=check(d)}catch(e){good=false}
+  if(!good){const v=d.version+1;try{d.close()}catch(e){}d=await req(v)}
+  d.onclose=()=>{p=null};d.onversionchange=()=>{try{d.close()}catch(e){}p=null};return d}
+ const open=()=>p||(p=openDb().catch(e=>{p=null;throw e}));
+ async function run(store,mode,fn){let last;for(let a=0;a<3;a++){try{const d=await open();return await new Promise((ok,no)=>{const t=d.transaction(store,mode);const s=t.objectStore(store);let res;const q=fn(s);if(q)q.onsuccess=()=>{res=q.result};t.oncomplete=()=>ok(res);t.onerror=()=>no(t.error||(q&&q.error));t.onabort=()=>no(t.error||new DOMException('abort','AbortError'))})}catch(e){last=e;IDB_LAST=errTxt(e);if(!e||e.name==='QuotaExceededError'||e.name==='DataCloneError'||e.name==='ConstraintError'||e.name==='NotSupportedError'||e.name==='SecurityError'||e.name==='TimeoutError'||e instanceof ReferenceError||e instanceof TypeError)throw e;p=null;await new Promise(r=>setTimeout(r,120*(a+1)))}}throw last}
  return{run}}
-const PDB=IDB('rcv_photos',1,d=>{if(!d.objectStoreNames.contains('ph'))d.createObjectStore('ph',{keyPath:'id',autoIncrement:true}).createIndex('code','code')});
-const TDB=IDB('rcv_data',1,d=>{if(!d.objectStoreNames.contains('trucks'))d.createObjectStore('trucks',{keyPath:'id'})});
-const phOf=code=>PDB.run('ph','readonly',s=>s.index('code').getAll(code));
+const PDB=IDB('rcv_photos',1,(d,ov,tx)=>{const s=d.objectStoreNames.contains('ph')?tx.objectStore('ph'):d.createObjectStore('ph',{keyPath:'id',autoIncrement:true});if(!s.indexNames.contains('code'))s.createIndex('code','code')},
+ d=>d.objectStoreNames.contains('ph')&&d.transaction('ph','readonly').objectStore('ph').indexNames.contains('code'));
+const TDB=IDB('rcv_data',1,d=>{if(!d.objectStoreNames.contains('trucks'))d.createObjectStore('trucks',{keyPath:'id'})},d=>d.objectStoreNames.contains('trucks'));
+
+/* ---------- تخزين الصور البديل (لما IndexedDB مش متاح أو فشل) ---------- */
+const PHX='rcv_phidx',PHK='rcv_ph_',PHC='rcv_photos_c1';
+let CACHE_OK=null;
+async function phCache(){if(CACHE_OK===false)return null;try{if(typeof caches==='undefined'||!caches||!window.isSecureContext)throw 0;const c=await caches.open(PHC);CACHE_OK=true;return c}catch(e){CACHE_OK=false;return null}}
+const phUrl=id=>location.origin+'/__rcvph/'+encodeURIComponent(id);
+function phIdx(){try{const a=JSON.parse(localStorage.getItem(PHX));return Array.isArray(a)?a:[]}catch(e){return[]}}
+function phIdxSet(a){localStorage.setItem(PHX,JSON.stringify(a))}
+function quotaErr(m){const e=new Error(m||'localStorage full');e.name='QuotaExceededError';return e}
+async function phAddLocal(rec,file,o){const id='L'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+ const meta={id,code:rec.code,rid:rec.rid,cause:rec.cause,w:rec.w,h:rec.h,t:rec.t};let cerr=null;
+ const c=o&&o.blob?await phCache():null;
+ if(c){try{await c.put(phUrl(id),new Response(o.blob,{headers:{'content-type':o.blob.type||'image/jpeg'}}));meta.st='c';const a=phIdx();a.push(meta);try{phIdxSet(a)}catch(e){try{await c.delete(phUrl(id))}catch(x){}throw e}return meta}catch(e){cerr=e}}
+ // localStorage: صورة أصغر (800px جودة 0.6) لأن المساحة محدودة، مع ترك مساحة احتياطية لبيانات العربيات
+ const tries=[[800,0.6],[640,0.5],[480,0.45]];let last=cerr;
+ for(const [mx,q] of tries){let d;
+  try{d=(await shrinkPhoto(file,mx,q,true)).data}catch(e){if(o&&o.blob&&o.blob.size<9e5&&typeof FileReader!=='undefined'){d=await blobToData(o.blob)}else throw e}
+  try{localStorage.setItem(PHK+id,d)}catch(e){last=e;continue}
+  const a=phIdx();meta.st='l';meta.w=meta.w||mx;a.push(meta);
+  try{phIdxSet(a);localStorage.setItem('rcv_probe','x'.repeat(300000));localStorage.removeItem('rcv_probe');return meta}
+  catch(e){last=e;try{localStorage.removeItem('rcv_probe')}catch(x){}try{localStorage.removeItem(PHK+id)}catch(x){}try{phIdxSet(phIdx().filter(m=>m.id!==id))}catch(x){}}}
+ if(last&&last.name==='QuotaExceededError'){const q=quotaErr('مساحة التخزين البديل على الجهاز امتلت');q.alt=1;throw q}
+ throw last||quotaErr()}
+async function phDelLocal(id){try{phIdxSet(phIdx().filter(m=>m.id!==id))}catch(e){}try{localStorage.removeItem(PHK+id)}catch(e){}try{const c=await phCache();if(c)await c.delete(phUrl(id))}catch(e){}}
+async function phOf(code){let a=[],ierr=null;
+ if(HAS_IDB){try{a=(await PDB.run('ph','readonly',s=>s.index('code').getAll(code)))||[]}catch(e){ierr=e}}
+ const loc=phIdx().filter(m=>m.code===code);
+ for(const m of loc){try{if(m.st==='l'){const d=localStorage.getItem(PHK+m.id);if(d)a.push({...m,data:d})}else if(m.st==='c'){const c=await phCache();const r=c&&await c.match(phUrl(m.id));if(r)a.push({...m,blob:await r.blob()})}}catch(e){}}
+ if(ierr&&!a.length&&HAS_IDB)throw ierr;
+ return a.sort((x,y)=>(x.t||0)-(y.t||0))}
 let persistAsked=false;function askPersist(){if(persistAsked)return;persistAsked=true;try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}}
 
 /* ---------- السجلات ---------- */
@@ -50,9 +94,9 @@ let RECS=[];   // كل العربيات (مسودات + تقارير)
 let CUR=null;  // العربية المفتوحة في الخطوات
 function lsGet(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}}
 function lsSet(k,v){try{localStorage.setItem(k,JSON.stringify(v));return true}catch(e){return false}}
-async function putRec(r){try{await TDB.run('trucks','readwrite',s=>s.put(clone(r)));const fb=lsGet(FB);if(fb&&fb[r.id]){delete fb[r.id];lsSet(FB,fb)}return true}catch(e){const fb=lsGet(FB)||{};fb[r.id]=r;if(!lsSet(FB,fb))toast('⚠ مساحة التخزين ممتلئة – البيانات ممكن متتحفظش',5000);return false}}
-async function loadRecs(){let all=[];try{all=await TDB.run('trucks','readonly',s=>s.getAll())||[]}catch(e){}
- const m=new Map(all.map(r=>[r.id,r]));const fb=lsGet(FB)||{};Object.values(fb).forEach(r=>{const o=m.get(r.id);if(!o||(r.updated||0)>(o.updated||0)){m.set(r.id,r);putRec(r)}});
+async function putRec(r){try{if(!HAS_IDB)throw new Error('no idb');await TDB.run('trucks','readwrite',s=>s.put(clone(r)));const fb=lsGet(FB);if(fb&&fb[r.id]){delete fb[r.id];lsSet(FB,fb)}return true}catch(e){const fb=lsGet(FB)||{};fb[r.id]=r;if(!lsSet(FB,fb)){toast('⚠ مساحة التخزين ممتلئة – البيانات ممكن متتحفظش',5000);return false}return 'fb'}}
+async function loadRecs(){let all=[];if(HAS_IDB){try{all=await TDB.run('trucks','readonly',s=>s.getAll())||[]}catch(e){}}
+ const m=new Map(all.map(r=>[r.id,r]));const fb=lsGet(FB)||{};Object.values(fb).forEach(r=>{const o=m.get(r.id);if(!o||(r.updated||0)>(o.updated||0)){m.set(r.id,r);if(HAS_IDB)putRec(r)}});
  const lv=lsGet(LIVE);if(lv&&lv.id){const o=m.get(lv.id);if(!o||(lv.updated||0)>(o.updated||0)){m.set(lv.id,lv);putRec(lv)}}
  RECS=[...m.values()];}
 function recById(id){return RECS.find(r=>r.id===id)}
@@ -63,7 +107,7 @@ function fromLegacy(t,status){const ts=Date.now();return{id:'L'+status[0]+'-'+(t
 async function migrate(){if(localStorage.getItem(MIG))return;const have=new Set(RECS.map(r=>r.id));const out=[];
  OLD.hist.forEach(t=>{if(t&&t.h&&t.h.code){const r=fromLegacy(t,'issued');if(t.r&&t.r.decision)r.legacyR=t.r;if(!have.has(r.id))out.push(r)}});
  const c=OLD.cur;if(c&&c.h&&hasData(c)){const hh=OLD.hist.find(t=>t&&t.h&&t.h.code==c.h.code);if(!hh||sig(hh)!==sig(c)){const r=fromLegacy(c,'draft');if(hh)r.notes=(r.notes||'');if(!have.has(r.id))out.push(r)}}
- let ok=true;for(const r of out){RECS.push(r);if(!await putRec(r))ok=false}
+ let ok=true;for(const r of out){RECS.push(r);if((await putRec(r))!==true)ok=false}
  if(ok)localStorage.setItem(MIG,new Date().toISOString())}
 async function uniqueCode(dt){const d=String(dt||cairoNowLocal()).slice(0,10).replace(/-/g,'');const used=new Set([...RECS.map(r=>r.code),...OLD.hist.map(t=>t&&t.h&&t.h.code),OLD.cur&&OLD.cur.h&&OLD.cur.h.code].filter(Boolean));
  for(let i=1;i<1000;i++){const c='RT-'+d+'-'+String(i).padStart(3,'0');if(used.has(c))continue;try{const ph=await phOf(c);if(ph&&ph.length)continue}catch(e){}return c}return 'RT-'+d+'-'+Date.now()}
@@ -72,7 +116,7 @@ async function newTruck(){const dt=cairoNowLocal();const ts=Date.now();const r={
 /* حفظ فوري: نسخة متزامنة في localStorage + IndexedDB خلال لحظة */
 let saveT=null;
 function touch(){if(!CUR)return;CUR.updated=Date.now();lsSet(LIVE,CUR);lsSet(OPEN,{id:CUR.id,step:CUR.step});clearTimeout(saveT);saveT=setTimeout(flush,250);const e=$('#ls');if(e)e.textContent='✓ اتحفظ تلقائيًا '+fmtTime(CUR.updated)}
-async function flush(){clearTimeout(saveT);saveT=null;if(CUR){const ok=await putRec(CUR);const e=$('#ls');if(e&&!ok)e.textContent='⚠ اتحفظ احتياطيًا على الجهاز (IndexedDB مش متاح)'}}
+async function flush(){clearTimeout(saveT);saveT=null;if(CUR){const ok=await putRec(CUR);const e=$('#ls');if(e&&ok==='fb')e.textContent='✓ اتحفظ تلقائيًا '+fmtTime(CUR.updated)+' · تخزين بديل على الجهاز'+(HAS_IDB?'':' (IndexedDB مقفول في سفاري)');else if(e&&ok===false)e.textContent='⚠ تعذر الحفظ – مساحة التخزين على الجهاز ممتلئة'}}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'&&CUR){lsSet(LIVE,CUR);flush()}});
 window.addEventListener('pagehide',()=>{if(CUR){lsSet(LIVE,CUR);flush()}});
 
@@ -110,30 +154,33 @@ function lr(fr,total){const raw=fr.map(f=>f*total),b=raw.map(Math.floor);let d=M
 const URLS=new Map();
 function phSrc(p){if(p.data)return p.data;if(!p.blob)return '';let u=URLS.get(p.id);if(!u){u=URL.createObjectURL(p.blob);URLS.set(p.id,u)}return u}
 function loadImgEl(src){return new Promise((ok,no)=>{const im=new Image();im.onload=()=>ok(im);im.onerror=()=>no(new DOMException('decode','EncodingError'));im.src=src})}
-async function shrinkPhoto(file,max=1280,q=0.7){let bmp=null,im=null,u=null;
- try{bmp=await createImageBitmap(file,{imageOrientation:'from-image'})}catch(e){try{bmp=await createImageBitmap(file)}catch(e2){bmp=null}}
+async function shrinkPhoto(file,max=1280,q=0.7,asData=false){let bmp=null,im=null,u=null;
+ if(typeof createImageBitmap==='function'){try{bmp=await createImageBitmap(file,{imageOrientation:'from-image'})}catch(e){try{bmp=await createImageBitmap(file)}catch(e2){bmp=null}}}
  if(!bmp){u=URL.createObjectURL(file);try{im=await loadImgEl(u)}catch(e){URL.revokeObjectURL(u);throw e}}
  const sw=bmp?bmp.width:im.naturalWidth,sh=bmp?bmp.height:im.naturalHeight;if(!sw||!sh)throw new DOMException('decode','EncodingError');
  const sc=Math.min(1,max/Math.max(sw,sh));const c=document.createElement('canvas');c.width=Math.max(1,Math.round(sw*sc));c.height=Math.max(1,Math.round(sh*sc));
  const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(bmp||im,0,0,c.width,c.height);
  if(bmp&&bmp.close)bmp.close();if(u)URL.revokeObjectURL(u);
+ if(asData){const data=c.toDataURL('image/jpeg',q);const o2={data,w:c.width,h:c.height};c.width=c.height=1;if(!data||data.length<100)throw new DOMException('encode','EncodingError');return o2}
  let blob=await new Promise(r=>{try{c.toBlob(r,'image/jpeg',q)}catch(e){r(null)}});
  if(!blob){const d=c.toDataURL('image/jpeg',q);blob=await (await fetch(d)).blob()}
  const out={blob,w:c.width,h:c.height};c.width=c.height=1;return out}
 const blobToData=b=>new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>ok(r.result);r.onerror=()=>no(r.error);r.readAsDataURL(b)});
-function phErr(e){const nm=e&&e.name||'';if(nm==='QuotaExceededError')return 'مساحة التخزين على الجهاز ممتلئة – فضّي مساحة على التليفون وجرب تاني';if(nm==='EncodingError')return 'الصورة دي مش مدعومة – صورها تاني من الكاميرا أو اختار صورة JPEG';return 'تعذر حفظ الصورة ('+(nm||'خطأ')+') – جرب تاني'}
+function phErr(e){const nm=e&&e.name||'';if(nm==='QuotaExceededError'&&e.alt)return 'مساحة الصور في التخزين البديل لسفاري امتلت – امسح صور قديمة من عربيات خلصت، أو اقفل Lockdown Mode للموقع ده من «aA» ← إعدادات موقع الويب';if(nm==='QuotaExceededError')return 'مساحة التخزين على الجهاز ممتلئة – فضّي مساحة على التليفون وجرب تاني';if(nm==='EncodingError')return 'الصورة دي مش مدعومة – صورها تاني من الكاميرا أو اختار صورة JPEG';return 'تعذر حفظ الصورة ('+errTxt(e)+') – جرب تاني'}
 async function addPhotos(cause,inp){if(!CUR)return;const files=[...(inp.files||[])];inp.value='';if(!files.length)return;askPersist();
- const st=document.getElementById('ps_'+cause);let ok=0,err='';
+ const st=document.getElementById('ps_'+cause);let ok=0,alt=0,err='';
  for(const f of files){if(st){st.className='phst';st.textContent='⏳ جاري حفظ الصورة…'}
   try{let o;try{o=await shrinkPhoto(f)}catch(e){if(e&&e.name==='EncodingError'&&f.size&&f.size<8e6)o={blob:f,w:0,h:0,orig:1};else throw e}
    const rec={code:CUR.code,rid:CUR.id,cause,blob:o.blob,w:o.w,h:o.h,t:Date.now()};
-   try{await PDB.run('ph','readwrite',s=>s.add(rec))}catch(e){if(e&&e.name==='DataCloneError'){delete rec.blob;rec.data=await blobToData(o.blob);await PDB.run('ph','readwrite',s=>s.add(rec))}else throw e}
+   let saved=false;
+   if(HAS_IDB){try{try{await PDB.run('ph','readwrite',s=>s.add(rec))}catch(e){if(e&&rec.blob&&typeof FileReader!=='undefined'&&e.name!=='QuotaExceededError'&&e.name!=='NotSupportedError'&&e.name!=='TimeoutError'){/* بعض نسخ سفاري (التصفح الخاص) مش بتقبل Blob في IndexedDB ← نخزنها نص */delete rec.blob;rec.data=await blobToData(o.blob);await PDB.run('ph','readwrite',s=>s.add(rec))}else throw e}saved=true}catch(e){console.warn('IDB photo save failed → fallback',e)}}
+   if(!saved){await phAddLocal(rec,f,o);alt++}
    ok++}catch(e){err=phErr(e);console.error(e)}}
  if(st){st.className='phst '+(err?'e':'o');st.textContent=err?'⚠ '+err:'✓ اتحفظت '+(ok>1?ok+' صور':'الصورة')}
- if(err)toast('⚠ '+err,5000);else toast('✓ اتحفظت الصورة');
+ if(err)toast('⚠ '+err,6000);else toast('✓ اتحفظت الصورة'+(alt?' (تخزين بديل)':''));
  CUR.phTs=Date.now();touch();await showThumbs()}
-async function delPhoto(id){if(!confirm('تمسح الصورة دي؟'))return;try{await PDB.run('ph','readwrite',s=>s.delete(id))}catch(e){toast('تعذر مسح الصورة')}const u=URLS.get(id);if(u){URL.revokeObjectURL(u);URLS.delete(id)}await showThumbs()}
-async function showThumbs(){if(!CUR)return;let L=[];try{L=await phOf(CUR.code)}catch(e){}document.querySelectorAll('.ths[data-cause]').forEach(d=>{const k=d.dataset.cause;d.innerHTML=L.filter(p=>p.cause==k).map(p=>`<div><img src="${phSrc(p)}" alt=""><button type=button onclick="delPhoto(${p.id})">×</button></div>`).join('')})}
+async function delPhoto(id){if(!confirm('تمسح الصورة دي؟'))return;if(typeof id==='string'&&/^\d+$/.test(id))id=+id;try{if(typeof id==='string'&&id[0]==='L')await phDelLocal(id);else await PDB.run('ph','readwrite',s=>s.delete(id))}catch(e){toast('تعذر مسح الصورة ('+errTxt(e)+')')}const u=URLS.get(id);if(u){URL.revokeObjectURL(u);URLS.delete(id)}await showThumbs()}
+async function showThumbs(){if(!CUR)return;let L=[];try{L=await phOf(CUR.code)}catch(e){}document.querySelectorAll('.ths[data-cause]').forEach(d=>{const k=d.dataset.cause;d.innerHTML=L.filter(p=>p.cause==k).map(p=>`<div><img src="${phSrc(p)}" alt=""><button type=button onclick="delPhoto('${p.id}')">×</button></div>`).join('')})}
 const phBtn=(cause,label)=>`<label class=phbtn>📷 ${label||'صورة'}<input type=file accept="image/*" multiple onchange="addPhotos('${cause}',this)"></label>`;
 
 /* ---------- التنقل ---------- */
@@ -152,6 +199,7 @@ async function route(){const h=location.hash||'#home';const p=h.slice(1).split('
 
 /* ---------- الرئيسية ---------- */
 let showArch=false;
+const STORE_NOTE=()=>HAS_IDB?'':`<div class=warnb>⚠ سفاري على الجهاز ده قافل التخزين الأساسي (IndexedDB) – غالبًا بسبب <span dir=ltr>Lockdown Mode</span>. البرنامج شغال عادي وبيحفظ البيانات والصور في تخزين بديل، بس مساحة الصور فيه أقل. للأفضل: في سفاري اضغط «aA» ← «إعدادات موقع الويب» واقفل <span dir=ltr>Lockdown Mode</span> للموقع ده بس.</div>`;
 function renderHome(){$('#ls').textContent='';
  const act=RECS.filter(r=>!r.archived);const dr=act.filter(r=>r.status==='draft').sort((a,b)=>b.updated-a.updated);const is=act.filter(r=>r.status==='issued').sort((a,b)=>(b.issuedAt||b.updated)-(a.issuedAt||a.updated));const ar=RECS.filter(r=>r.archived).sort((a,b)=>b.updated-a.updated);
  const who=r=>esc([r.h.supplier,r.h.plate&&('عربية '+r.h.plate)].filter(Boolean).join(' · ')||'بدون بيانات لسه');
@@ -162,7 +210,7 @@ function renderHome(){$('#ls').textContent='';
  <div class=card><h2>جاري التسجيل (${dr.length})</h2>${drH||'<p class=note>مفيش عربيات تحت التسجيل.</p>'}</div>
  <div class=card><h2>تقارير صادرة (${is.length})</h2>${isH||'<p class=note>لسه مفيش تقارير.</p>'}${is.length?'<div style="margin-top:8px"><button class="gr sm" onclick="exportCSV()">⬇ تصدير Excel</button></div>':''}</div>
  ${ar.length?`<div class=card><h2 style="display:flex;justify-content:space-between">الأرشيف (${ar.length}) <button class="gr sm" onclick="showArch=!showArch;renderHome()">${showArch?'إخفاء':'عرض'}</button></h2>${showArch?arH:''}</div>`:''}
- <div class=card><p class=note style="margin:0">📱 كل البيانات والصور محفوظة على <b>الجهاز ده بس</b> وبتتحفظ تلقائيًا أول بأول، حتى لو التليفون قفل. مفيش حاجة بتتمسح غير لو انت أرشفتها. للأمان على الآيفون: من سفاري اضغط مشاركة ← «إضافة إلى الشاشة الرئيسية» وافتح البرنامج من الأيقونة.</p><p class=note style="margin:6px 0 0">نسخة ${APP_VER} · <a href="https://alrashed-station.netlify.app/">برامج المحطة</a> · <a href="https://alrashed-station.netlify.app/counter.html">عدّ الحبات</a></p></div>`}
+ ${STORE_NOTE()}<div class=card><p class=note style="margin:0">📱 كل البيانات والصور محفوظة على <b>الجهاز ده بس</b> وبتتحفظ تلقائيًا أول بأول، حتى لو التليفون قفل. مفيش حاجة بتتمسح غير لو انت أرشفتها. للأمان على الآيفون: من سفاري اضغط مشاركة ← «إضافة إلى الشاشة الرئيسية» وافتح البرنامج من الأيقونة.</p><p class=note style="margin:6px 0 0">نسخة ${APP_VER} · <a href="https://alrashed-station.netlify.app/">برامج المحطة</a> · <a href="https://alrashed-station.netlify.app/counter.html">عدّ الحبات</a></p></div>`}
 async function archive(id,v){const r=recById(id);if(!r)return;if(v&&!confirm('تنقل '+r.code+' للأرشيف؟ (مش هتتمسح، وتقدر ترجعها)'))return;r.archived=!!v;r.updated=Date.now();await putRec(r);renderHome()}
 
 /* ---------- الخطوات ---------- */
@@ -380,7 +428,7 @@ function makePdf(imgs){const enc=new TextEncoder(),parts=[],off=[];let len=0;con
 /* ---------- الإعدادات ---------- */
 async function renderSettings(){let est='',per='';try{const e=await navigator.storage.estimate();est=`المستخدم على الجهاز ≈ ${(e.usage/1048576).toFixed(1)} ميجا`}catch(e){}try{per=await navigator.storage.persisted()?'التخزين دائم ✓':'التخزين عادي (سفاري ممكن يمسحه لو البرنامج متفتحش أسابيع – أضفه للشاشة الرئيسية)'}catch(e){}
  V().innerHTML=`<div class=card><h2>الإعدادات (حدود قابلة للتعديل)</h2><div class=grid>${SETF.map(([k,l,t])=>`<label class=f>${l}<input data-set=${k} type=${t||'number'} inputmode=${t?'text':'decimal'} value="${esc(ST[k])}"></label>`).join('')}</div><p class=note>دي قيم افتراضية عملية وليست مواصفة رسمية. التغيير بيأثر على العربيات تحت التسجيل بس – التقارير الصادرة بتفضل بإعداداتها وقت الإصدار.</p><button class=gr onclick="resetSet()">رجّع الإعدادات الافتراضية</button></div>
- <div class=card><h2>البيانات</h2><p class=note>كل البيانات والصور على الجهاز ده بس. ${esc(est)}${est?' · ':''}${esc(per)}</p><button class=gr onclick="exportCSV()">⬇ تصدير Excel</button> <button class=gr onclick="backupJSON()">⬇ نسخة احتياطية (بدون صور)</button><p class=note>نسخة البرنامج ${APP_VER}</p></div>`}
+ <div class=card><h2>البيانات</h2>${STORE_NOTE()}<p class=note>كل البيانات والصور على الجهاز ده بس. ${esc(est)}${est?' · ':''}${esc(per)}</p><button class=gr onclick="exportCSV()">⬇ تصدير Excel</button> <button class=gr onclick="backupJSON()">⬇ نسخة احتياطية (بدون صور)</button><p class=note>نسخة البرنامج ${APP_VER}</p></div>`}
 document.addEventListener('input',e=>{const t=e.target,k=t.dataset.set;if(!k)return;ST[k]=t.type=='number'?n(t.value):t.value;saveSet();$('#ls').textContent='✓ اتحفظت الإعدادات'});
 function resetSet(){if(!confirm('ترجع كل الإعدادات للقيم الافتراضية؟'))return;ST={...DSET,v2:1};saveSet();renderSettings()}
 function exportCSV(){const H=['الكود','التاريخ','رقم العربية','السواق','المورد','المنطقة','الصنف','صناديق','الصافي كجم','ثمار العينة','متوسط وزن الثمرة جم','تصدير %','محلي %','مسببات أعفان %','إجمالي العيوب %','خصم %','القرار'];
