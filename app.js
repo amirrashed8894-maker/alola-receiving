@@ -1,8 +1,8 @@
 'use strict';
-/* استلام الخام — العلا · v2.1.1 (مقاسات حسب الصنف والعبوة من sizes.js المشترك؛ 125 برتقال خارج التصدير؛ البلدي رجع)
+/* استلام الخام — العلا · v2.2.0 (عبوات متعددة لنفس العربية؛ مقاسات كل عبوة لوحدها؛ التصدير مجمّع)
    كل البيانات على الجهاز ده بس: سجلات العربيات في IndexedDB (rcv_data) + نسخة فورية للمسودة المفتوحة في localStorage،
    والصور في IndexedDB (rcv_photos). السجل القديم rcv_v1 لا يُمسح أبدًا (الإعدادات لسه فيه). */
-const APP_VER='2.1.1';
+const APP_VER='2.2.0';
 const KEY='rcv_v1',MIG='rcv_mig2',OPEN='rcv_open2',LIVE='rcv_live2',FB='rcv_fb2';
 const OR_SIZES=['أكبر من 36','36','40','48','56','64','72','80','88','100','113','أصغر من 113'];
 const VAR=[['navel','برتقال أبوسرة'],['valencia','برتقال صيفي (فالنسيا)'],['baladi','برتقال بلدي'],['lemon','ليمون'],['mclem','أفندي كلمنتينا'],['mfrem','أفندي فريمونت'],['murk','موركوت كيني'],['murs','موركوت إسباني']];
@@ -10,8 +10,17 @@ const VAR_LEGACY=[]; // البلدي رجع اختيار للعربات الجد
 /* الصنف ← مجموعة جدول المقاسات (sizes.js) */
 const VGRP={navel:'orange',valencia:'orange',baladi:'orange',lemon:'lemon',mclem:'mand',mfrem:'mand',murk:'mand',murs:'mand'};
 const grpOf=v=>VGRP[v]||'';
-const packOfRec=rec=>{const g=grpOf(rec.h.variety),p=window.ALS&&ALS.PK[rec.h.pack];return p&&p.g===g?p:null};
-const packLbl=rec=>{const p=packOfRec(rec);return p?p.label:''};
+const packOk=(id,g)=>{const p=window.ALS&&ALS.PK[id];return p&&p.g===g?p:null};
+function packIdsOf(rec){const g=grpOf(rec.h&&rec.h.variety);if(!g)return [];const seen=new Set(),out=[];
+ (Array.isArray(rec.h.packs)?rec.h.packs:(rec.h.pack?[rec.h.pack]:[])).forEach(id=>{if(packOk(id,g)&&!seen.has(id)){seen.add(id);out.push(id)}});return out}
+const packOfRec=rec=>{const ids=packIdsOf(rec);return ids.length?packOk(ids[0],grpOf(rec.h.variety)):null};
+const packLbl=rec=>packIdsOf(rec).map(id=>ALS.PK[id].label).join(' + ');
+const packKeys=p=>{if(!p||!p.sizes)return [];const L=p.sizes.map(String);return ['أكبر من '+L[0]].concat(L,['أصغر من '+L[L.length-1]])};
+const SK='::';
+function parseSK(k){k=String(k||'');const i=k.indexOf(SK);return i<0?{id:'',k:k}:{id:k.slice(0,i),k:k.slice(i+SK.length)}}
+function szGet(rec,packId,k){if(packId&&rec.szp&&rec.szp[packId]&&rec.szp[packId][k]!=null&&rec.szp[packId][k]!=='')return rec.szp[packId][k];return rec.sz&&rec.sz[k]}
+function szSet(rec,packId,k,val){rec.sz=rec.sz||{};if(packId){rec.szp=rec.szp||{};rec.szp[packId]=rec.szp[packId]||{};rec.szp[packId][k]=val;if(packIdsOf(rec).length<=1)rec.sz[k]=val}else rec.sz[k]=val}
+function packCountN(rec,id,st){st=st||stOf(rec);const keys=isMurV(rec.h.variety)?bandsOf(st).map(b=>b.k):packKeys(ALS.PK[id]);return keys.reduce((a,k)=>a+n(szGet(rec,id,k)),0)}
 const DEFS=[ // id,name,class(d = مسبب عفن, M تشوه رئيسي, m تشوه ثانوي),only
 ['navrot','عفن السرة','d','navel'],['oleo','البقع الزيتية','d'],['plug','القطف الغائر (نتشة)','d'],['bruise','الكدمات','d'],['cut','الجروح','d'],['fly','ذبابة الفاكهة','d'],['soft','الليونة','d'],['tabh','التبحير','d'],['split','تشققات','d'],['sun','لسعة شمس شديدة','d'],['deep','خدش عميق','d'],['wet','ثمار مبللة','d'],['ocause','مسببات أخرى','d'],
 ['wind','خدوش ريح','m'],['mite','حلم صدأي / تربس','m'],['scale','حشرة قشرية','m'],['sunl','لسعة شمس خفيفة','m'],['green2','اخضرار لون','m'],['shape','تشوه شكل','M'],['crease','تجعد القشرة (Creasing)','M'],['bignav','سرة كبيرة','M','navel'],['puff','انتفاخ القشرة (Puffiness)','M','mur'],['other','تشوهات أخرى','m']];
@@ -117,7 +126,7 @@ async function migrate(){if(localStorage.getItem(MIG))return;const have=new Set(
  if(ok)localStorage.setItem(MIG,new Date().toISOString())}
 async function uniqueCode(dt){const d=String(dt||cairoNowLocal()).slice(0,10).replace(/-/g,'');const used=new Set([...RECS.map(r=>r.code),...OLD.hist.map(t=>t&&t.h&&t.h.code),OLD.cur&&OLD.cur.h&&OLD.cur.h.code].filter(Boolean));
  for(let i=1;i<1000;i++){const c='RT-'+d+'-'+String(i).padStart(3,'0');if(used.has(c))continue;try{const ph=await phOf(c);if(ph&&ph.length)continue}catch(e){}return c}return 'RT-'+d+'-'+Date.now()}
-async function newTruck(){const dt=cairoNowLocal();const ts=Date.now();const r={id:newId(),code:await uniqueCode(dt),status:'draft',archived:false,step:0,sv:2,h:{code:'',dt,variety:'',pack:''},c:{},sz:{},wts:'',mode:'cnt',d:{},dn:{},notes:'',created:ts,updated:ts};r.h.code=r.code;RECS.push(r);await putRec(r);askPersist();go('#w/'+r.id+'/0')}
+async function newTruck(){const dt=cairoNowLocal();const ts=Date.now();const r={id:newId(),code:await uniqueCode(dt),status:'draft',archived:false,step:0,sv:3,h:{code:'',dt,variety:'',pack:'',packs:[]},c:{},sz:{},szp:{},wts:'',mode:'cnt',d:{},dn:{},notes:'',created:ts,updated:ts};r.h.code=r.code;RECS.push(r);await putRec(r);askPersist();go('#w/'+r.id+'/0')}
 
 /* حفظ فوري: نسخة متزامنة في localStorage + IndexedDB خلال لحظة */
 let saveT=null;
@@ -130,15 +139,24 @@ window.addEventListener('pagehide',()=>{if(CUR){lsSet(LIVE,CUR);flush()}});
 const isMurV=v=>grpOf(v)==='mand'||String(v||'').startsWith('mur');
 function bandsOf(st){const b=String(st.bands).split(/[,،\s]+/).map(Number).filter(x=>x>0).sort((a,b)=>a-b);const r=[{k:'<'+b[0],lo:0,hi:b[0]}];for(let i=0;i<b.length-1;i++)r.push({k:b[i]+'-'+b[i+1],lo:b[i],hi:b[i+1]});r.push({k:'>'+b[b.length-1],lo:b[b.length-1],hi:1e9});return r}
 /* القديم (سجلات قبل 2.1.0 من غير عبوة): نفس قائمة OR_SIZES وإعداد orExp زي ما هي — حساباتها ما اتغيرتش.
-   الجديد: الصنف ← العبوة ← مقاسات العبوة دي بس + «أكبر من» و«أصغر من» (خارج التصدير).
-   من 2.1.1: مقاس 125 في برتقال 14/15 ك والجامبو بيتكتب ويتقاس عادي (قطر ووزن) بس مش تصدير — التصدير بيقف عند 113. */
+   عبوة واحدة (h.pack / h.packs بطول 1): نفس مفاتيح المقاس والحساب السابق.
+   من 2.2.0: أكثر من عبوة — مفاتيح packId::size، التعداد في szp، والتصدير مجمّع بنفس قواعد كل عبوة (125 برتقال 14/15/جامبو خارج). قائمة المقاسات القديمة مش اختيار للعربات الجديدة. */
 function packSizes(rec){const p=packOfRec(rec);return p&&p.sizes?p.sizes.map(String):null}
-function sizeKeysOf(rec,st){if(isMurV(rec.h.variety))return bandsOf(st).map(b=>b.k);const L=packSizes(rec);if(L)return ['أكبر من '+L[0]].concat(L,['أصغر من '+L[L.length-1]]);if(rec.sv||!rec.h.variety)return [];return OR_SIZES}
-function isExpOf(k,rec,st){if(isMurV(rec.h.variety)){const b=bandsOf(st).find(x=>x.k==k);return !!(b&&b.lo>=n(st.murMin)&&b.hi<=n(st.murMax))}const p=packOfRec(rec);if(p&&window.ALS&&ALS.isExport)return ALS.isExport(grpOf(rec.h.variety),p,k);return String(st.orExp).split(/[,،\s]+/).includes(k)}
+function sizeKeysOf(rec,st){const ids=packIdsOf(rec);const multi=ids.length>1;
+ if(isMurV(rec.h.variety)){const B=bandsOf(st).map(b=>b.k);return multi?ids.flatMap(id=>B.map(k=>id+SK+k)):B}
+ if(multi)return ids.flatMap(id=>packKeys(ALS.PK[id]).map(k=>id+SK+k));
+ if(ids.length===1)return packKeys(ALS.PK[ids[0]]);
+ if(rec.sv||!rec.h.variety)return [];return OR_SIZES}
+function isExpOf(k,rec,st){const psk=parseSK(k),raw=psk.k;
+ if(isMurV(rec.h.variety)){const b=bandsOf(st).find(x=>x.k==raw);return !!(b&&b.lo>=n(st.murMin)&&b.hi<=n(st.murMax))}
+ const p=psk.id&&window.ALS&&ALS.PK[psk.id]||packOfRec(rec);if(p&&window.ALS&&ALS.isExport)return ALS.isExport(grpOf(rec.h.variety),p,raw);return String(st.orExp).split(/[,،\s]+/).includes(raw)}
 /* القطر ووزن الحبة التقريبي جنب كل مقاس (خط خفيف) */
-function szInfo(k,rec,st,compact){if(!window.ALS)return '';const g=grpOf(rec.h.variety);
- if(isMurV(rec.h.variety)){const b=bandsOf(st).find(x=>x.k==k);if(!b)return '';const p=packOfRec(rec);const o=ALS.band(b.lo,b.hi>=1e9?0:b.hi,p&&p.kg);return compact?(o.dia?'≈'+o.dia+' مم':''):ALS.bandText(o,p&&p.kg)}
- if(!/^\d+$/.test(k)||!g)return '';const p=packOfRec(rec)||(g==='orange'||g==='lemon'?ALS.PK[g==='lemon'?'l15':'c15']:null);const o=ALS.info(g,p,k);return compact?ALS.compact(o):ALS.text(o)}
+function szInfo(k,rec,st,compact){if(!window.ALS)return '';const g=grpOf(rec.h.variety);const psk=parseSK(k),raw=psk.k;
+ const p=psk.id&&ALS.PK[psk.id]||packOfRec(rec);
+ if(isMurV(rec.h.variety)){const b=bandsOf(st).find(x=>x.k==raw);if(!b)return '';const o=ALS.band(b.lo,b.hi>=1e9?0:b.hi,p&&p.kg);return compact?(o.dia?'≈'+o.dia+' مم':''):ALS.bandText(o,p&&p.kg)}
+ if(!/^\d+$/.test(raw)||!g)return '';const pk=p||(g==='orange'||g==='lemon'?ALS.PK[g==='lemon'?'l15':'c15']:null);const o=ALS.info(g,pk,raw);return compact?ALS.compact(o):ALS.text(o)}
+function sizeLabel(k,rec){const psk=parseSK(k),raw=psk.k;const mur=isMurV(rec.h.variety);const base=mur?raw+' جم':(/^\d+$/.test(raw)?'حجم '+raw:raw);
+ if(psk.id&&packIdsOf(rec).length>1){const p=ALS.PK[psk.id];return (p?p.label+' · ':'')+base}return base}
 function defsOf(rec){const v=rec.h.variety;return DEFS.filter(d=>!d[3]||(d[3]=='navel'?v=='navel':isMurV(v)))}
 function weightsOf(rec){return(rec.wts||'').split(/[^\d.]+/).map(Number).filter(x=>x>0)}
 const stOf=rec=>rec.status==='issued'&&rec.setSnap?rec.setSnap:ST;
@@ -146,7 +164,7 @@ function compute(rec,st){st=st||stOf(rec);const h=rec.h,mur=isMurV(h.variety);
  h.net=Math.max(0,n(h.gross)-n(h.tare))||'';h.avgc=n(h.crates)&&h.net?Math.round(h.net/n(h.crates)*10)/10:'';
  const keys=sizeKeysOf(rec,st);let cnt={};let wl=[];
  if(mur&&rec.mode=='w'){wl=weightsOf(rec);const B=bandsOf(st);keys.forEach(k=>cnt[k]=0);wl.forEach(w=>{const b=B.find(b=>w>=b.lo&&w<b.hi)||B[B.length-1];cnt[b.k]++})}
- else keys.forEach(k=>cnt[k]=n(rec.sz[k]));
+ else keys.forEach(k=>{const psk=parseSK(k);cnt[k]=n(szGet(rec,psk.id||packIdsOf(rec)[0]||'',psk.k))});
  const N=keys.reduce((a,k)=>a+cnt[k],0);const nc=Math.max(5,Math.min(12,Math.round(Math.sqrt(n(h.crates)||300)/3)+(n(h.crates)>300?2:0)));
  const defs=defsOf(rec);const by={d:0,M:0,m:0};defs.forEach(([k,,c])=>by[c]+=n(rec.d[k]));
  const isE=k=>isExpOf(k,rec,st);
@@ -240,7 +258,7 @@ function renderStep(){const i=CUR.step,L=STEPS.length;compute(CUR);
 function goStep(j,noVal){if(!CUR)return;CUR.step=j;touch();go('#w/'+CUR.id+'/'+j)}
 function next(){const e=validate(CUR.step);if(e){$('#stepErr').innerHTML=`<div class=err>${e}</div>`;$('#stepErr').scrollIntoView({behavior:'smooth',block:'center'});return}goStep(CUR.step+1)}
 function validate(i){const h=CUR.h,R=compute(CUR);
- if(i===0){if(!h.dt)return 'سجّل التاريخ والوقت';if(!String(h.plate||'').trim()&&!String(h.supplier||'').trim())return 'اكتب رقم العربية أو اسم المورّد على الأقل';if(CUR.sv&&!h.variety)return 'اختار الصنف';const g=grpOf(h.variety);if(CUR.sv&&(g==='orange'||g==='lemon')&&!packOfRec(CUR))return 'اختار العبوة علشان تظهر المقاسات المناسبة'}
+ if(i===0){if(!h.dt)return 'سجّل التاريخ والوقت';if(!String(h.plate||'').trim()&&!String(h.supplier||'').trim())return 'اكتب رقم العربية أو اسم المورّد على الأقل';if(CUR.sv&&!h.variety)return 'اختار الصنف';const g=grpOf(h.variety);if(CUR.sv&&(g==='orange'||g==='lemon')&&!packIdsOf(CUR).length)return 'اختار عبوة واحدة على الأقل — العربية ممكن فيها أكثر من عبوة لنفس الصنف'}
  if(i===1){if(n(h.gross)<0||n(h.tare)<0)return 'الأوزان لازم تكون موجبة';if(n(h.gross)&&n(h.tare)&&n(h.gross)<=n(h.tare))return 'الوزن القائم لازم يكون أكبر من الفارغ'}
  if(i===3){if(!(n(h.sampN)>0))return 'اكتب عدد ثمار العينة'}
  if(i===4){if(!R.keys.length)return 'اختار الصنف والعبوة الأول من خطوة «بيانات العربية»';if(!R.N)return 'سجّل أعداد الأحجام';if(n(h.sampN)&&R.N!==n(h.sampN))return `مجموع الأحجام ${R.N} ثمرة ≠ عدد العينة ${n(h.sampN)} ثمرة (${R.N>n(h.sampN)?'زيادة '+(R.N-n(h.sampN)):'ناقص '+(n(h.sampN)-R.N)}).<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"><button class=sm onclick="fixSamp()">خلّي عدد العينة = ${R.N}</button><button class="sm gr" onclick="document.getElementById('stepErr').innerHTML=''">هراجع الأعداد</button></div>`}
@@ -256,8 +274,22 @@ function stTruck(){const h=CUR.h;return `<div class=card><div class=grid>
  ${packField()}
  ${fld('h','crates','عدد الصناديق',{type:'number',im:'numeric'})}</div><p class=note>* رقم العربية أو المورّد على الأقل.</p></div>`}
 function packField(){const h=CUR.h,g=grpOf(h.variety),L=window.ALS&&g?ALS.packsFor(g):[];const req=g==='orange'||g==='lemon';
- const ph=!h.variety?'اختار الصنف الأول':g==='mand'?'— وزن الصندوق (اختياري) —':(CUR.sv?'— اختار العبوة —':'— قائمة المقاسات القديمة —');
- return `<label class="f${req&&CUR.sv?' req':''}">العبوة (المقاسات بتظهر حسبها)<select data-g=h data-k=pack ${h.variety?'':'disabled'}><option value="" ${packOfRec(CUR)?'':'selected'}>${ph}</option>${L.map(p=>`<option value=${p.id} ${h.pack==p.id?'selected':''}>${p.label}${p.sizes?' — '+p.sizes.join('، '):''}</option>`).join('')}</select></label>`}
+ const ids=packIdsOf(CUR),legacy=!CUR.sv&&!ids.length;
+ if(!h.variety)return `<div class="f" style="grid-column:1/-1"><span>العبوة</span><p class=note style="margin:6px 0 0">اختار الصنف الأول، وبعدين العبوات اللي في العربية — ممكن أكثر من عبوة (مثلاً أوبن توب 7 ك ومقفول 7 ك مع بعض).</p></div>`;
+ const chips=L.map(p=>{const on=ids.includes(p.id);const sz=p.sizes?p.sizes.join('، '):(p.free?'شرائح الوزن · القطر حسب وزن الصندوق':'');
+  return `<button type=button class="pkchip${on?' on':''}" data-pack="${p.id}" onclick="togglePack('${p.id}')"><span class=pkck aria-hidden="true">${on?'✓':''}</span><span class=pkbody><span class=pklab>${p.label}</span>${sz?`<small>${sz}</small>`:''}</span></button>`}).join('');
+ return `<div class="f${req&&CUR.sv?' req':''}" style="grid-column:1/-1"><span>العبوة — اختار واحدة أو أكثر لو العربية مخلوطة</span>
+  <div class=pklist>${chips}</div>
+  ${ids.length?`<p class=note style="margin:6px 0 0">المختار: <b>${esc(ids.map(id=>ALS.PK[id].label).join(' + '))}</b> — كل عبوة ليها مقاساتها في خطوة الأحجام.</p>`:(req?`<p class=note style="margin:6px 0 0">اختار عبوة واحدة على الأقل علشان تظهر المقاسات المناسبة.</p>`:`<p class=note style="margin:6px 0 0">وزن الصندوق اختياري للأفندي — لو العربية فيها أكتر من وزن صندوق، اختارهم كلهم.</p>`)}
+  ${legacy?`<p class=note>السجل ده من نسخة سابقة وبيتقاس على <b>قائمة المقاسات القديمة</b>. القائمة دي مش بتظهر للعربات الجديدة. لو اختارت عبوة، المقاسات هتتحوّل لعبوة (الأعداد القديمة هتفضل محفوظة وترجع لو رجّعت).</p>`:''}
+ </div>`}
+function ensureSzp(rec,id){rec.szp=rec.szp||{};if(!rec.szp[id]){rec.szp[id]={};if(rec.h.pack===id||packIdsOf(rec)[0]===id)Object.keys(rec.sz||{}).forEach(k=>{rec.szp[id][k]=rec.sz[k]})}}
+function togglePack(id){if(!CUR||!CUR.h.variety)return;const g=grpOf(CUR.h.variety),p=packOk(id,g);if(!p)return;
+ let ids=packIdsOf(CUR).slice();const i=ids.indexOf(id);
+ if(i>=0){const n0=packCountN(CUR,id);if(n0&&!confirm('العبوة «'+p.label+'» فيها تعداد '+n0+' ثمرة.\nلو شلتها مش هتتحسب دلوقتي، والتعداد هيفضل محفوظ ويرجع لو رجّعتها.\n\nتشيل العبوة؟'))return;ids.splice(i,1)}
+ else{if(!CUR.sv&&!ids.length){const lost=OR_SIZES.filter(k=>n(CUR.sz[k])>0);if(lost.length&&!confirm('السجل ده على قائمة المقاسات القديمة وفيها تعداد:\n'+lost.map(k=>k+': '+CUR.sz[k]+' ثمرة').join('\n')+'\n\nلو اختارت عبوة، الأعداد دي مش هتتحسب (هتفضل محفوظة). لازم تعدّ على مقاسات العبوة.\n\nتكمل؟'))return}
+  if(ids.length===1)ensureSzp(CUR,ids[0]);ids.push(id);ensureSzp(CUR,id);if(CUR.sv)CUR.sv=Math.max(n(CUR.sv),3)}
+ CUR.h.packs=ids;CUR.h.pack=ids[0]||'';touch();renderStep()}
 function stW(){return `<div class=card><div class=grid>${fld('h','gross','الوزن القائم (كجم)',{type:'number'})}${fld('h','tare','الفارغ (كجم)',{type:'number'})}${fld('h','net','الصافي (كجم)',{ro:1})}${fld('h','avgc','متوسط وزن الصندوق (كجم)',{ro:1})}</div><p class=note>الفارغ ممكن يتسجل بعد التنزيل – ارجع للخطوة دي في أي وقت قبل إصدار التقرير.</p><div id=lw></div></div>`}
 function stChk(){return `<div class=card>${CF.map(([k,l,o])=>`<div class=chkrow><b>${l}</b><div class=seg>${o.map((x,j)=>`<button type=button class="${n(CUR.c[k])==j?'on':''}" onclick="setChk('${k}',${j},this)">${x}</button>`).join('')}</div></div>`).join('')}
  <label class=f>ملاحظات<textarea data-g=notes rows=2>${esc(CUR.notes||'')}</textarea></label></div>
@@ -266,14 +298,24 @@ function setChk(k,j,b){CUR.c[k]=String(j);b.parentNode.querySelectorAll('button'
 function stSamp(){return `<div class=card><div class=grid>${fld('h','sampN','عدد ثمار العينة',{type:'number',im:'numeric',req:1})}${fld('h','sampKg','وزن العينة (كجم)',{type:'number'})}</div>
  <p class=note>المستهدف ${esc(ST.sample)} ثمرة على الأقل · عدد الصناديق المقترح للعينة: <b id=nc></b> صندوق (من القدام والنص والورا، ومن فوق والنص وتحت).</p><div id=lsamp></div></div>
  <div class=card><h3 style="margin-top:0">الجودة (اختياري)</h3><div class=grid>${fld('h','brix','بريكس %',{type:'number'})}${fld('h','acid','حموضة %',{type:'number'})}${fld('h','juice','عصير %',{type:'number'})}${fld('h','color','لون القشرة 1-5',{type:'number'})}</div></div>`}
-function tallyRow(g,k,label,sub,out){const v=CUR[g][k]??'';return `<div class="tr${out?' out':''}"><div class=tl>${label}<small>${sub}</small></div><button type=button class=st onclick="inc('${g}',this,-1)">−</button><input data-g=${g} data-k="${esc(k)}" type=number inputmode=numeric min=0 value="${esc(v)}"><button type=button class=st onclick="inc('${g}',this,1)">+</button><div class=tp data-p="${esc(k)}"></div></div>`}
-function inc(g,b,d){const i=b.parentNode.querySelector('input');const v=Math.max(0,n(i.value)+d);i.value=v||'';CUR[g][i.dataset.k]=i.value;touch();live()}
-function stSz(){const st=ST,mur=isMurV(CUR.h.variety);let s=`<div class=sumbar id=szsum></div>`;
+function tallyRow(g,k,label,sub,out,packId){const v=g==='sz'?szGet(CUR,packId||packIdsOf(CUR)[0]||'',k):CUR[g][k]??'';const dp=packId&&g==='sz'&&packIdsOf(CUR).length>1?packId+SK+k:k;const pk=packId&&g==='sz'?` data-pack="${esc(packId)}"`:'';
+ return `<div class="tr${out?' out':''}"><div class=tl>${label}<small>${sub}</small></div><button type=button class=st onclick="inc('${g}',this,-1)">−</button><input data-g=${g} data-k="${esc(k)}"${pk} type=number inputmode=numeric min=0 value="${esc(v)}"><button type=button class=st onclick="inc('${g}',this,1)">+</button><div class=tp data-p="${esc(dp)}"></div></div>`}
+function inc(g,b,d){const i=b.parentNode.querySelector('input');const v=Math.max(0,n(i.value)+d);i.value=v||'';if(g==='sz')szSet(CUR,i.dataset.pack||packIdsOf(CUR)[0]||'',i.dataset.k,i.value);else CUR[g][i.dataset.k]=i.value;touch();live()}
+function szBlock(id,keys,st,mur){const p=id&&window.ALS&&ALS.PK[id];const title=p?p.label:(mur?'شرائح الوزن':'قائمة المقاسات القديمة');
+ const n0=keys.reduce((a,k)=>a+n(szGet(CUR,id||'',parseSK(k).k===k?k:parseSK(k).k)),0);
+ const rows=keys.map(full=>{const psk=parseSK(full),raw=psk.k,pid=psk.id||id||'';const e=isExpOf(full,CUR,st);const zi=szInfo(full,CUR,st);
+  const lab=mur?raw+' جم':(/^\d+$/.test(raw)?'حجم '+raw:raw);
+  return tallyRow('sz',raw,lab,(e?'تصدير':'خارج التصدير')+(zi?`<span class=szd>${esc(zi)}</span>`:''),!e,pid)});
+ return `<div class=pkblock><div class=pkg><b>${esc(title)}</b><span>${n0} ثمرة</span></div><div class=card>${rows.join('')}</div></div>`}
+function stSz(){const st=ST,mur=isMurV(CUR.h.variety),ids=packIdsOf(CUR);let s=`<div class=sumbar id=szsum></div>`;
  if(mur)s+=`<div class=seg style="margin-bottom:10px"><button type=button class="${CUR.mode!='w'?'on':''}" onclick="CUR.mode='cnt';touch();renderStep()">عدد لكل شريحة وزن</button><button type=button class="${CUR.mode=='w'?'on':''}" onclick="CUR.mode='w';touch();renderStep()">أوزان الثمار فردية</button></div>`;
- if(mur&&CUR.mode=='w')s+=`<div class=card><label class=f>أوزان الثمار بالجرام (افصل بمسافة أو فاصلة)<textarea data-g=wts rows=5 inputmode=decimal>${esc(CUR.wts)}</textarea></label><div id=wsum class=note></div></div>`;
+ if(mur&&CUR.mode=='w'){s+=`<p class=note style="margin:0 0 6px"><b>${esc(VN[CUR.h.variety]||'')}</b>${packLbl(CUR)?' · '+esc(packLbl(CUR)):''}</p><div class=card><label class=f>أوزان الثمار بالجرام (افصل بمسافة أو فاصلة)<textarea data-g=wts rows=5 inputmode=decimal>${esc(CUR.wts)}</textarea></label><div id=wsum class=note></div></div>`;
+  if(ids.length)s+=`<p class=note>الأوزان الفردية بتتحسب مرة واحدة على العربية. القطر التقريبي لكل شريحة يظهر حسب وزن الصندوق المختار${ids.length>1?' (لكل عبوة)':''}.</p>`}
  else{const keys=sizeKeysOf(CUR,st);if(!keys.length)return `<div class=warnb>${CUR.h.variety?'اختار العبوة':'اختار الصنف والعبوة'} الأول علشان تظهر المقاسات المناسبة.</div><button class=sm onclick="goStep(0,1)">→ بيانات العربية</button>`;
-  s+=`<p class=note style="margin:0 0 6px"><b>${esc(VN[CUR.h.variety]||'')}</b>${packLbl(CUR)?' · '+esc(packLbl(CUR)):(mur?'':' · قائمة المقاسات القديمة')}</p><div class=card>${keys.map(k=>{const e=isExpOf(k,CUR,st);const zi=szInfo(k,CUR,st);return tallyRow('sz',k,mur?k+' جم':(/^\d+$/.test(k)?'حجم '+k:k),(e?'تصدير':'خارج التصدير')+(zi?`<span class=szd>${esc(zi)}</span>`:''),!e)}).join('')}</div>`}
- return s+`<p class=note>عدّ كل ثمار العينة حسب الحجم – المجموع لازم يساوي عدد العينة (${n(CUR.h.sampN)||'—'}). الأحجام الباهتة خارج مقاسات ${packLbl(CUR)?'العبوة':'التصدير حسب الإعدادات'}. القطر من جدول مقاسات البرتقال والليمون، و≈ = تقريبي.</p>`}
+  s+=`<p class=note style="margin:0 0 6px"><b>${esc(VN[CUR.h.variety]||'')}</b>${packLbl(CUR)?' · '+esc(packLbl(CUR)):(mur?'':' · قائمة المقاسات القديمة')}</p>`;
+  if(ids.length>1){ids.forEach(id=>{const ks=keys.filter(k=>parseSK(k).id===id);s+=szBlock(id,ks,st,mur)})}
+  else s+=szBlock(ids[0]||'',keys,st,mur)}
+ return s+`<p class=note>عدّ كل ثمار العينة حسب الحجم${ids.length>1?' لكل عبوة، والمجموع على العربية كلها':''} – المجموع لازم يساوي عدد العينة (${n(CUR.h.sampN)||'—'}). الأحجام الباهتة خارج مقاسات التصدير. القطر من جدول مقاسات البرتقال والليمون، و≈ = تقريبي.</p>`}
 function stDef(){const defs=defsOf(CUR);let s=`<div class=sumbar id=dfsum></div><p class=note>كل ثمرة تتسجل مرة واحدة تحت <b>أكبر عيب فيها</b>. صوّر كل سبب من زرار 📷 جنبه.</p>`;
  ['d','M','m'].forEach(c=>{const L=defs.filter(d=>d[2]==c);s+=`<div class=grp><span>${CLS[c]}</span><span id=gt_${c}></span></div><div class=card style="padding-top:4px">`+L.map(([k,l])=>`<div class=dfx>${tallyRow('d',k,l,'',false)}<div class=more>${phBtn(k)}<input data-g=dn data-k=${k} placeholder="ملاحظة" value="${esc(CUR.dn[k]||'')}"></div><div class=phst id=ps_${k}></div><div class=ths data-cause=${k}></div></div>`).join('')+'</div>'});return s}
 function stRev(){const R=compute(CUR),h=CUR.h;const miss=[];if(!n(h.gross))miss.push('الوزن القائم');if(!n(h.tare))miss.push('الوزن الفارغ');if(!R.N)miss.push('الأحجام');
@@ -301,16 +343,22 @@ function live(){if(!CUR)return;const R=compute(CUR),h=CUR.h,i=CUR.step;
   document.querySelectorAll('.tp[data-p]').forEach(e=>{const c=n(CUR.d[e.dataset.p]);e.innerHTML=c?pc(R.P(c)):''})}}
 document.addEventListener('input',e=>{const t=e.target,g=t.dataset.g;if(!g||!CUR)return;const k=t.dataset.k;
  if(g==='h'&&(k==='variety'||k==='pack'))return;
- if(g==='h'||g==='sz'||g==='d'||g==='dn'){CUR[g][k]=t.value}else if(g==='wts')CUR.wts=t.value;else if(g==='notes')CUR.notes=t.value;else return;
+ if(g==='sz'){szSet(CUR,t.dataset.pack||packIdsOf(CUR)[0]||'',k,t.value)}
+ else if(g==='h'||g==='d'||g==='dn'){CUR[g][k]=t.value}else if(g==='wts')CUR.wts=t.value;else if(g==='notes')CUR.notes=t.value;else return;
  touch();live()});
-/* تغيير الصنف/العبوة: الأعداد المسجلة لمقاسات مش في القائمة الجديدة بتتحذّر قبلها. ما بتتمسحش – بتفضل محفوظة ومش بتتحسب، وترجع لو رجعت للاختيار القديم */
-document.addEventListener('change',e=>{const t=e.target;if(t.dataset.g!=='h'||!CUR||(t.dataset.k!=='variety'&&t.dataset.k!=='pack'))return;const k=t.dataset.k,old={variety:CUR.h.variety,pack:CUR.h.pack};
- const nh=Object.assign({},CUR.h,{[k]:t.value});if(k==='variety'){const g=grpOf(t.value);const p=window.ALS&&ALS.PK[nh.pack];if(p&&p.g!==g)nh.pack=''}
- const oldK=compute(clone(CUR)).keys;const tmp=clone(CUR);tmp.h=nh;const newK=sizeKeysOf(tmp,stOf(tmp));
- const lost=isMurV(old.variety)&&CUR.mode=='w'&&!isMurV(nh.variety)&&weightsOf(CUR).length?[weightsOf(CUR).length+' وزن ثمرة']:[];
- oldK.forEach(x=>{const v=n(CUR.sz[x]);if(v>0&&!newK.includes(x))lost.push((/^\d+$/.test(x)?'حجم '+x:x)+': '+v+' ثمرة')});
- if(lost.length&&!confirm('تنبيه: الأعداد دي مسجلة ومش موجودة في مقاسات الاختيار الجديد:\n'+lost.join('\n')+'\n\nلو كمّلت مش هتتحسب (هتفضل محفوظة وترجع لو رجعت للاختيار القديم)، ولازم تعدّ العينة تاني على المقاسات الجديدة.\n\nتكمل؟')){t.value=old[k]||'';return}
- CUR.h.variety=nh.variety;CUR.h.pack=nh.pack||'';touch();renderStep()});
+/* تغيير الصنف: الأعداد لمقاسات مش في الاختيار الجديد بتتحذّر. ما بتتمسحش. تغيير العبوة من togglePack. */
+document.addEventListener('change',e=>{const t=e.target;if(!CUR||t.dataset.g!=='h'||t.dataset.k!=='variety')return;
+ const oldV=CUR.h.variety,nhV=t.value,oldG=grpOf(oldV),newG=grpOf(nhV);
+ const oldIds=packIdsOf(CUR).slice();
+ const keep=oldIds.filter(id=>packOk(id,newG));
+ const dropped=oldIds.filter(id=>!packOk(id,newG));
+ const tmp=clone(CUR);tmp.h=Object.assign({},CUR.h,{variety:nhV,packs:keep,pack:keep[0]||''});
+ const oldK=compute(clone(CUR)).keys,newK=sizeKeysOf(tmp,stOf(tmp));
+ const lost=isMurV(oldV)&&CUR.mode=='w'&&!isMurV(nhV)&&weightsOf(CUR).length?[weightsOf(CUR).length+' وزن ثمرة']:[];
+ dropped.forEach(id=>{const n0=packCountN(CUR,id);if(n0)lost.push((ALS.PK[id]?ALS.PK[id].label:id)+': '+n0+' ثمرة')});
+ oldK.forEach(x=>{const psk=parseSK(x);const v=n(szGet(CUR,psk.id||oldIds[0]||'',psk.k));if(v>0&&!newK.includes(x)&&!lost.some(z=>z.indexOf(psk.k)>=0))lost.push(sizeLabel(x,CUR)+': '+v+' ثمرة')});
+ if(lost.length&&!confirm('تنبيه: الأعداد دي مسجلة ومش موجودة في مقاسات الصنف الجديد:\n'+lost.join('\n')+'\n\nلو كمّلت مش هتتحسب (هتفضل محفوظة وترجع لو رجعت للاختيار القديم).\n\nتكمل؟')){t.value=oldV||'';return}
+ CUR.h.variety=nhV;CUR.h.packs=keep;CUR.h.pack=keep[0]||'';touch();renderStep()});
 
 async function issue(){for(let i=0;i<6;i++){const e=validate(i);if(e){if(confirm('في خطوة «'+stepTitle(i)+'» لازم تتراجع:\n'+e.replace(/<[^>]+>.*$/s,'')+'\n\nتروح للخطوة دي؟'))goStep(i,1);return}}
  const R=compute(CUR);if(!n(CUR.h.net)&&!confirm('الوزن الصافي مش متسجل – التقرير هيطلع بدون كيلوجرامات. تكمل؟'))return;
@@ -320,6 +368,10 @@ async function issue(){for(let i=0;i<6;i++){const e=validate(i);if(e){if(confirm
 async function reopen(id){const r=recById(id);if(!r)return;if(!confirm('تفتح التقرير للتعديل؟ هيرجع مسودة لحد ما تصدره تاني.'))return;r.status='draft';r.setSnap=null;r.step=6;r.updated=Date.now();await putRec(r);go('#w/'+id+'/6')}
 
 /* ---------- التقرير ---------- */
+function sizeGroups(rec,R){const ids=packIdsOf(rec);
+ if(ids.length<=1)return [{id:ids[0]||'',label:'',keys:R.keys,ix:R.keys.map((_,i)=>i)}];
+ return ids.map(id=>{const ix=R.keys.map((k,i)=>parseSK(k).id===id?i:-1).filter(i=>i>=0);return {id,label:ALS.PK[id].label,keys:ix.map(i=>R.keys[i]),ix}})}
+function rawKey(k){return parseSK(k).k}
 function repData(r){const c=clone(r),R=compute(c,stOf(r)),h=c.h,N=R.N,net=Math.round(n(h.net));
  const vn=R.keys.map(k=>R.cnt[k]);const szKg=lr(vn.map(x=>N?x/N:0),N?net:0);
  const fE=R.exp/100,fW=R.rej/100,fL=Math.max(0,1-fE-fW);const [kE,kL,kW]=lr([fE,fL,fW],net);
@@ -344,7 +396,7 @@ async function renderReport(r){const D=repData(r),{R,h,N,net}=D;let PH=[];try{PH
  <div class=kpi>${kpi('المورّد',esc(h.supplier))}${kpi('التاريخ',dateOf(r))}${kpi('رقم العربية',esc(h.plate))}${kpi('الصنف',esc(VN[h.variety]||'')+(packLbl(r)?`<span class=szd>${esc(packLbl(r))}</span>`:''))}${kpi('الوزن الصافي',net?kgS(net):'')}${kpi('عدد الصناديق',n(h.crates)?n(h.crates)+' صندوق':'')}${kpi('العينة',N+' ثمرة'+(n(h.sampKg)?' / '+n(h.sampKg)+' كجم':''))}${kpi('متوسط وزن الثمرة',R.avgW?f0(R.avgW)+' جم'+(window.ALS&&ALS.infoByWeight(R.avgW)?`<span class=szd>قطر ≈ ${ALS.infoByWeight(R.avgW).dia} مم (تقريبي)</span>`:''):'')}
  ${kpi('مسببات الأعفان',pc(R.dec),1)}${kpi('إجمالي العيوب',pc(D.totP))}${kpi('نسبة التصدير',pc(R.exp),1)}${kpi('الخصم المقترح',R.ded>0?pc(R.ded)+' = '+kgS(net*R.ded/100):'لا يوجد')}</div>
  <div class=card style="margin-top:12px"><h3 style="margin-top:0">توزيع العربية التقديري</h3><table class=t><tr><th>البند</th><th>%</th><th></th><th>كجم</th></tr>${D.dist.map(d=>`<tr><td>${d[0]}</td><td class=n>${d[1].toFixed(1)}%</td><td style="width:30%"><span class=bar style="width:${Math.max(0,Math.min(100,d[1]))}%"></span></td><td class=n>${net?kgS(d[2]):'—'}</td></tr>`).join('')}</table>
- <h3>${R.mur?'شرائح الوزن':'توزيع الأحجام'} (${N} ثمرة)</h3><table class=t><tr><th>${R.mur?'الوزن (جم)':'الحجم'}</th><th>عدد</th><th>%</th><th></th><th>كجم</th></tr>${R.keys.map((k,i)=>`<tr${R.isE(k)?'':' style="color:#64748b"'}><td>${esc(k)}${R.isE(k)?'':' <span class=note>(خارج التصدير)</span>'}${(()=>{const z=szInfo(k,r,st);return z?`<span class=szd>${esc(z)}</span>`:''})()}</td><td class=n>${D.vn[i]}</td><td class=n>${P1(D.vn[i])}</td><td style="width:28%"><span class=bar style="width:${D.vn[i]/mx*100}%"></span></td><td class=n>${net?kgS(D.szKg[i]):'—'}</td></tr>`).join('')}<tr class=tot><td>الإجمالي</td><td class=n>${N}</td><td class=n>${N?'100%':'—'}</td><td>تصدير ${N-R.off} · خارج ${R.off}</td><td class=n>${net&&N?kgS(net):'—'}</td></tr></table>
+ <h3>${R.mur?'شرائح الوزن':'توزيع الأحجام'} (${N} ثمرة${packIdsOf(r).length>1?' · '+packIdsOf(r).length+' عبوات':''})</h3><table class=t><tr><th>${R.mur?'الوزن (جم)':'الحجم'}</th><th>عدد</th><th>%</th><th></th><th>كجم</th></tr>${sizeGroups(r,R).map(g=> (g.label?`<tr class=grp><td colspan=5><b>${esc(g.label)}</b> · ${g.ix.reduce((a,i)=>a+D.vn[i],0)} ثمرة</td></tr>`:'')+g.ix.map(i=>{const k=R.keys[i];return `<tr${R.isE(k)?'':' style="color:#64748b"'}><td>${esc(rawKey(k))}${R.isE(k)?'':' <span class=note>(خارج التصدير)</span>'}${(()=>{const z=szInfo(k,r,st);return z?`<span class=szd>${esc(z)}</span>`:''})()}</td><td class=n>${D.vn[i]}</td><td class=n>${P1(D.vn[i])}</td><td style="width:28%"><span class=bar style="width:${D.vn[i]/mx*100}%"></span></td><td class=n>${net?kgS(D.szKg[i]):'—'}</td></tr>`}).join('')).join('')}<tr class=tot><td>الإجمالي${packIdsOf(r).length>1?' (كل العبوات)':''}</td><td class=n>${N}</td><td class=n>${N?'100%':'—'}</td><td>تصدير ${N-R.off} · خارج ${R.off}</td><td class=n>${net&&N?kgS(net):'—'}</td></tr></table>
  <p class=note>${n(h.sampN)?(n(h.sampN)==N?'✓ العدد يطابق حجم العينة المسجل':'⚠ لا يطابق حجم العينة المسجل '+n(h.sampN)):''} القطر من جدول مقاسات البرتقال والليمون في مصر، و≈ = تقريبي (عبوة 7 ك أو أفندي: العدد × 15 ÷ وزن العبوة ← أقرب صف)، ووزن الحبة = وزن العبوة ÷ العدد.</p>
  <h3>مسببات الأعفان <span class=note>(قبول ≤ ${st.decOk}% · رفض > ${st.decMax}%)</span></h3>${defTb('d')}
  <h3>التشوهات والعيوب <span class=note>(رئيسية مسموح ${st.defTol}%)</span></h3>${defTb('x')}
@@ -385,7 +437,7 @@ async function renderPages(r,opt={}){const D=repData(r),{R,h,N,net}=D,st=R.st;le
  function tbl(rx,w,y,title,cols,rows){const sum=cols.reduce((a,c)=>a+c.w,0);cols=cols.map(c=>({...c,w:c.w/sum*w}));const rh=27,hh=27;
   x.fillStyle='#e6e6e6';x.fillRect(rx-w,y,w,30);x.fillStyle='#000';x.fillRect(rx-5,y,5,30);T(title,rx-12,y+22,{s:17,w:800,max:w-20});y+=32;
   x.fillStyle='#f3f3f3';x.fillRect(rx-w,y,w,hh);let cx=rx;cols.forEach(c=>{T(c.t,c.a==='c'?cx-c.w/2:cx-6,y+19,{s:13.5,w:700,c:'#333',a:c.a==='c'?'center':'right',max:c.w-6});cx-=c.w});y+=hh;
-  rows.forEach(rw=>{if(rw.tot){x.fillStyle='#f3f3f3';x.fillRect(rx-w,y,w,rh);x.fillStyle='#000';x.fillRect(rx-w,y,w,1.5)}cx=rx;
+  rows.forEach(rw=>{if(rw.tot){x.fillStyle='#f3f3f3';x.fillRect(rx-w,y,w,rh);x.fillStyle='#000';x.fillRect(rx-w,y,w,1.5)}if(rw.grp){x.fillStyle='#eef2f9';x.fillRect(rx-w,y,w,rh)}cx=rx;
    rw.c.forEach((v,i)=>{const c=cols[i];if(v&&typeof v==='object'&&v.bar!=null){const bw=Math.max(0,Math.min(1,v.bar))*(c.w-12);x.fillStyle='#666';x.fillRect(cx-6-bw,y+8,bw,11)}
     else{const o=v&&typeof v==='object'?v:{t:v};T(o.t,c.a==='c'?cx-c.w/2:cx-6,y+19,{s:15,w:rw.tot?800:(o.w||400),c:o.c||'#000',a:c.a==='c'?'center':'right',max:c.w-8});if(o.sub){font(15,rw.tot?800:(o.w||400));const mw=Math.min(x.measureText(String(o.t)).width,c.w-8);T(o.sub,cx-6-mw-8,y+19,{s:11.5,c:'#8a8a8a',max:Math.max(10,c.w-mw-20)})}}cx-=c.w});
    x.strokeStyle='#bbb';x.lineWidth=1;x.beginPath();x.moveTo(rx-w,y+rh);x.lineTo(rx,y+rh);x.stroke();y+=rh});
@@ -410,8 +462,10 @@ async function renderPages(r,opt={}){const D=repData(r),{R,h,N,net}=D,st=R.st;le
  const pw=CW/5,ph=78;KP.forEach((k,i)=>{const cx=RX-i*pw;box(cx-pw+3,y,pw-6,ph,2);T(k[0],cx-pw/2,y+22,{s:14.5,w:700,c:'#444',a:'center'});T(k[1],cx-pw/2,y+54,{s:27,w:800,a:'center'});T(k[2],cx-pw/2,y+72,{s:12.5,c:'#555',a:'center',max:pw-14})});y+=ph+10;
  // عمودين: يمين الأحجام + التوزيع + التشوهات · شمال المسببات + فحص العربية
  const gap=18,cw2=(CW-gap)/2,rR=RX,rL=M+cw2;const mx=Math.max(1,...D.vn);let yR=y,yL=y;
- yR=tbl(rR,cw2,yR,(R.mur?'شرائح الوزن':'توزيع الأحجام')+` (${N} ثمرة)`,[{t:R.mur?'الوزن جم':'الحجم',w:3.4},{t:'عدد',w:1,a:'c'},{t:'%',w:1.1,a:'c'},{t:'',w:1.4},{t:'كجم',w:1.5,a:'c'},{t:'تصدير',w:.9,a:'c'}],
-  [...R.keys.map((k,i)=>({c:[{t:k,c:R.isE(k)?'#000':'#777',sub:szInfo(k,r,st,1)},String(D.vn[i]),N?(D.vn[i]/N*100).toFixed(1)+'%':'—',{bar:D.vn[i]/mx},net?f0(D.szKg[i]):'—',R.isE(k)?'✓':'✗']})),{tot:1,c:['الإجمالي',String(N),N?'100%':'—',`تصدير ${N-R.off} · خارج ${R.off}`,net&&N?f0(net):'—','']}]);
+ const srows=[];sizeGroups(r,R).forEach(g=>{if(g.label)srows.push({grp:1,c:[{t:g.label,w:800,c:'#16285A'},String(g.ix.reduce((a,i)=>a+D.vn[i],0)),'','','','']});
+  g.ix.forEach(i=>{const k=R.keys[i];srows.push({c:[{t:rawKey(k),c:R.isE(k)?'#000':'#777',sub:szInfo(k,r,st,1)},String(D.vn[i]),N?(D.vn[i]/N*100).toFixed(1)+'%':'—',{bar:D.vn[i]/mx},net?f0(D.szKg[i]):'—',R.isE(k)?'✓':'✗']})})});
+ yR=tbl(rR,cw2,yR,(R.mur?'شرائح الوزن':'توزيع الأحجام')+` (${N} ثمرة${packIdsOf(r).length>1?' · '+packIdsOf(r).length+' عبوات':''})`,[{t:R.mur?'الوزن جم':'الحجم',w:3.4},{t:'عدد',w:1,a:'c'},{t:'%',w:1.1,a:'c'},{t:'',w:1.4},{t:'كجم',w:1.5,a:'c'},{t:'تصدير',w:.9,a:'c'}],
+  [...srows,{tot:1,c:['الإجمالي'+(packIdsOf(r).length>1?' (كل العبوات)':''),String(N),N?'100%':'—',`تصدير ${N-R.off} · خارج ${R.off}`,net&&N?f0(net):'—','']}]);
  {const z=R.keys.some(k=>szInfo(k,r,st,1));if(z){T('القطر من جدول مقاسات البرتقال والليمون · ≈ تقريبي · الجرامات = وزن الحبة التقريبي',rR-4,yR+6,{s:11.5,c:'#8a8a8a',max:cw2-8});yR+=18}}
  yR=tbl(rR,cw2,yR,'توزيع العربية التقديري',[{t:'البند',w:2.6},{t:'%',w:1.1,a:'c'},{t:'',w:2},{t:'كجم',w:1.4,a:'c'}],[...D.dist.map(d=>({c:[d[0],d[1].toFixed(1)+'%',{bar:d[1]/100},net?f0(d[2]):'—']})),{tot:1,c:['الإجمالي','100%','',net?f0(net):'—']}]);
  const phc=k=>PH.filter(p=>p.cause==k).length;
@@ -459,8 +513,8 @@ async function renderSettings(){let est='',per='';try{const e=await navigator.st
  <div class=card><h2>البيانات</h2>${STORE_NOTE()}<p class=note>كل البيانات والصور على الجهاز ده بس. ${esc(est)}${est?' · ':''}${esc(per)}</p><button class=gr onclick="exportCSV()">⬇ تصدير Excel</button> <button class=gr onclick="backupJSON()">⬇ نسخة احتياطية (بدون صور)</button><p class=note>نسخة البرنامج ${APP_VER}</p></div>`}
 document.addEventListener('input',e=>{const t=e.target,k=t.dataset.set;if(!k)return;ST[k]=t.type=='number'?n(t.value):t.value;saveSet();$('#ls').textContent='✓ اتحفظت الإعدادات'});
 function resetSet(){if(!confirm('ترجع كل الإعدادات للقيم الافتراضية؟'))return;ST={...DSET,v2:1};saveSet();renderSettings()}
-function exportCSV(){const H=['الكود','التاريخ','رقم العربية','السواق','المورد','المنطقة','الصنف','صناديق','الصافي كجم','ثمار العينة','متوسط وزن الثمرة جم','تصدير %','محلي %','مسببات أعفان %','إجمالي العيوب %','خصم %','القرار'];
- const rows=RECS.filter(r=>r.status==='issued'&&!r.archived).map(r=>{const D=repData(r),R=D.R,h=D.h;return[r.code,fmtLocal(h.dt),h.plate,h.driver,h.supplier,h.region,VN[h.variety],h.crates,h.net,R.N,Math.round(R.avgW),f1(R.exp),f1(R.loc),f1(R.dec),f1(D.totP),f1(R.ded),R.dtxt]});
+function exportCSV(){const H=['الكود','التاريخ','رقم العربية','السواق','المورد','المنطقة','الصنف','صناديق','الصافي كجم','ثمار العينة','متوسط وزن الثمرة جم','تصدير %','محلي %','مسببات أعفان %','إجمالي العيوب %','خصم %','القرار','العبوات'];
+ const rows=RECS.filter(r=>r.status==='issued'&&!r.archived).map(r=>{const D=repData(r),R=D.R,h=D.h;return[r.code,fmtLocal(h.dt),h.plate,h.driver,h.supplier,h.region,VN[h.variety],h.crates,h.net,R.N,Math.round(R.avgW),f1(R.exp),f1(R.loc),f1(R.dec),f1(D.totP),f1(R.ded),R.dtxt,packLbl(r)]});
  const csv='\ufeff'+[H,...rows].map(r=>r.map(x=>'"'+String(x??'').replace(/"/g,'""')+'"').join(',')).join('\r\n');dl(new Blob([csv],{type:'text/csv;charset=utf-8'}),'receiving.csv')}
 function backupJSON(){dl(new Blob([JSON.stringify({app:'receiving',ver:APP_VER,at:new Date().toISOString(),records:RECS,settings:ST},null,1)],{type:'application/json'}),'receiving-backup.json')}
 
