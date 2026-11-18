@@ -2,6 +2,8 @@
 
 Static site on Render (alola-receiving.onrender.com). Login via alola-maggi-auth (app id `receiving`) — `auth-gate.js` unchanged.
 
+v2.1.1: برتقال بلدي is again selectable on new trucks (same packs/sizes as other orange). Size 125 in orange 14/15 kg and jumbo stays selectable with diameter/weight, but is not counted as export (export stops at 113, as before). Legacy records (no pack) and all other calculations unchanged.
+
 v2.1.0: sizes by variety → pack from shared `sizes.js` (same file in alola-production / alola-quality). New trucks pick الصنف first, then العبوة; only that pack's sizes show (+ «أكبر من»/«أصغر من» buckets). Diameter (Egypt orange/lemon count table) and approx fruit weight shown in light text on screen, report and PDF; 7 kg cartons and mandarin marked ≈ (count × 15 ÷ pack kg → nearest row). Legacy records (no pack) keep OR_SIZES + orExp unchanged. Variety/pack change warns; counts are kept, never deleted.
 
 v2.0.1: official Alola letterhead (header + footer) on the A4 report PDF / print view.

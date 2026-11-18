@@ -1,12 +1,12 @@
 'use strict';
-/* استلام الخام — العلا · v2.1.0 (مقاسات حسب الصنف والعبوة من sizes.js المشترك)
+/* استلام الخام — العلا · v2.1.1 (مقاسات حسب الصنف والعبوة من sizes.js المشترك؛ 125 برتقال خارج التصدير؛ البلدي رجع)
    كل البيانات على الجهاز ده بس: سجلات العربيات في IndexedDB (rcv_data) + نسخة فورية للمسودة المفتوحة في localStorage،
    والصور في IndexedDB (rcv_photos). السجل القديم rcv_v1 لا يُمسح أبدًا (الإعدادات لسه فيه). */
-const APP_VER='2.1.0';
+const APP_VER='2.1.1';
 const KEY='rcv_v1',MIG='rcv_mig2',OPEN='rcv_open2',LIVE='rcv_live2',FB='rcv_fb2';
 const OR_SIZES=['أكبر من 36','36','40','48','56','64','72','80','88','100','113','أصغر من 113'];
-const VAR=[['navel','برتقال أبوسرة'],['valencia','برتقال صيفي (فالنسيا)'],['lemon','ليمون'],['mclem','أفندي كلمنتينا'],['mfrem','أفندي فريمونت'],['murk','موركوت كيني'],['murs','موركوت إسباني'],['baladi','برتقال بلدي']];
-const VAR_LEGACY=['baladi']; // بيظهر بس في السجلات القديمة اللي متسجل فيها
+const VAR=[['navel','برتقال أبوسرة'],['valencia','برتقال صيفي (فالنسيا)'],['baladi','برتقال بلدي'],['lemon','ليمون'],['mclem','أفندي كلمنتينا'],['mfrem','أفندي فريمونت'],['murk','موركوت كيني'],['murs','موركوت إسباني']];
+const VAR_LEGACY=[]; // البلدي رجع اختيار للعربات الجديدة (نفس مقاسات البرتقال)
 /* الصنف ← مجموعة جدول المقاسات (sizes.js) */
 const VGRP={navel:'orange',valencia:'orange',baladi:'orange',lemon:'lemon',mclem:'mand',mfrem:'mand',murk:'mand',murs:'mand'};
 const grpOf=v=>VGRP[v]||'';
@@ -130,10 +130,11 @@ window.addEventListener('pagehide',()=>{if(CUR){lsSet(LIVE,CUR);flush()}});
 const isMurV=v=>grpOf(v)==='mand'||String(v||'').startsWith('mur');
 function bandsOf(st){const b=String(st.bands).split(/[,،\s]+/).map(Number).filter(x=>x>0).sort((a,b)=>a-b);const r=[{k:'<'+b[0],lo:0,hi:b[0]}];for(let i=0;i<b.length-1;i++)r.push({k:b[i]+'-'+b[i+1],lo:b[i],hi:b[i+1]});r.push({k:'>'+b[b.length-1],lo:b[b.length-1],hi:1e9});return r}
 /* القديم (سجلات قبل 2.1.0 من غير عبوة): نفس قائمة OR_SIZES وإعداد orExp زي ما هي — حساباتها ما اتغيرتش.
-   الجديد: الصنف ← العبوة ← مقاسات العبوة دي بس + «أكبر من» و«أصغر من» (خارج التصدير). */
+   الجديد: الصنف ← العبوة ← مقاسات العبوة دي بس + «أكبر من» و«أصغر من» (خارج التصدير).
+   من 2.1.1: مقاس 125 في برتقال 14/15 ك والجامبو بيتكتب ويتقاس عادي (قطر ووزن) بس مش تصدير — التصدير بيقف عند 113. */
 function packSizes(rec){const p=packOfRec(rec);return p&&p.sizes?p.sizes.map(String):null}
 function sizeKeysOf(rec,st){if(isMurV(rec.h.variety))return bandsOf(st).map(b=>b.k);const L=packSizes(rec);if(L)return ['أكبر من '+L[0]].concat(L,['أصغر من '+L[L.length-1]]);if(rec.sv||!rec.h.variety)return [];return OR_SIZES}
-function isExpOf(k,rec,st){if(isMurV(rec.h.variety)){const b=bandsOf(st).find(x=>x.k==k);return !!(b&&b.lo>=n(st.murMin)&&b.hi<=n(st.murMax))}const L=packSizes(rec);if(L)return L.includes(k);return String(st.orExp).split(/[,،\s]+/).includes(k)}
+function isExpOf(k,rec,st){if(isMurV(rec.h.variety)){const b=bandsOf(st).find(x=>x.k==k);return !!(b&&b.lo>=n(st.murMin)&&b.hi<=n(st.murMax))}const p=packOfRec(rec);if(p&&window.ALS&&ALS.isExport)return ALS.isExport(grpOf(rec.h.variety),p,k);return String(st.orExp).split(/[,،\s]+/).includes(k)}
 /* القطر ووزن الحبة التقريبي جنب كل مقاس (خط خفيف) */
 function szInfo(k,rec,st,compact){if(!window.ALS)return '';const g=grpOf(rec.h.variety);
  if(isMurV(rec.h.variety)){const b=bandsOf(st).find(x=>x.k==k);if(!b)return '';const p=packOfRec(rec);const o=ALS.band(b.lo,b.hi>=1e9?0:b.hi,p&&p.kg);return compact?(o.dia?'≈'+o.dia+' مم':''):ALS.bandText(o,p&&p.kg)}
