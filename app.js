@@ -1,8 +1,8 @@
 'use strict';
-/* استلام الخام — العلا · v2.2.0 (عبوات متعددة لنفس العربية؛ مقاسات كل عبوة لوحدها؛ التصدير مجمّع)
+/* استلام الخام — العلا · v2.3.0 (كود العربية بتاريخ الاستلام؛ عبوات متعددة لنفس العربية؛ مقاسات كل عبوة لوحدها؛ التصدير مجمّع)
    كل البيانات على الجهاز ده بس: سجلات العربيات في IndexedDB (rcv_data) + نسخة فورية للمسودة المفتوحة في localStorage،
    والصور في IndexedDB (rcv_photos). السجل القديم rcv_v1 لا يُمسح أبدًا (الإعدادات لسه فيه). */
-const APP_VER='2.2.0';
+const APP_VER='2.3.0';
 const KEY='rcv_v1',MIG='rcv_mig2',OPEN='rcv_open2',LIVE='rcv_live2',FB='rcv_fb2';
 const OR_SIZES=['أكبر من 36','36','40','48','56','64','72','80','88','100','113','أصغر من 113'];
 const VAR=[['navel','برتقال أبوسرة'],['valencia','برتقال صيفي (فالنسيا)'],['baladi','برتقال بلدي'],['lemon','ليمون'],['mclem','أفندي كلمنتينا'],['mfrem','أفندي فريمونت'],['murk','موركوت كيني'],['murs','موركوت إسباني']];
@@ -126,6 +126,16 @@ async function migrate(){if(localStorage.getItem(MIG))return;const have=new Set(
  if(ok)localStorage.setItem(MIG,new Date().toISOString())}
 async function uniqueCode(dt){const d=String(dt||cairoNowLocal()).slice(0,10).replace(/-/g,'');const used=new Set([...RECS.map(r=>r.code),...OLD.hist.map(t=>t&&t.h&&t.h.code),OLD.cur&&OLD.cur.h&&OLD.cur.h.code].filter(Boolean));
  for(let i=1;i<1000;i++){const c='RT-'+d+'-'+String(i).padStart(3,'0');if(used.has(c))continue;try{const ph=await phOf(c);if(ph&&ph.length)continue}catch(e){}return c}return 'RT-'+d+'-'+Date.now()}
+/* 2.3.0: كود العربية RT-YYYYMMDD-NNN لازم يكون بتاريخ الاستلام نفسه (h.dt).
+   لو التاريخ اتغير → كود جديد بالتاريخ الجديد، والصور بتتنقل على الكود الجديد (مفيش صورة بتضيع). */
+const codeDay=c=>{const m=String(c||'').match(/^RT-(\d{8})-/);return m?m[1]:''};
+const dtDay=dt=>String(dt||'').slice(0,10).replace(/-/g,'');
+const codeOff=r=>!!(r&&r.h&&r.h.dt&&codeDay(r.code)&&codeDay(r.code)!==dtDay(r.h.dt)&&/^\d{8}$/.test(dtDay(r.h.dt)));
+async function recode(r){if(!codeOff(r))return false;const old=r.code;const nc=await uniqueCode(r.h.dt);if(!nc||nc===old)return false;
+ if(HAS_IDB){try{const a=(await PDB.run('ph','readonly',s=>s.index('code').getAll(old)))||[];for(const m of a)await PDB.run('ph','readwrite',s=>s.put({...m,code:nc}))}catch(e){console.warn('photo recode',e)}}
+ try{const ix=phIdx();let ch=false;ix.forEach(m=>{if(m.code===old){m.code=nc;ch=true}});if(ch)phIdxSet(ix)}catch(e){}
+ r.codeHist=(r.codeHist||[]).concat([{code:old,at:Date.now()}]);r.code=nc;r.h.code=nc;r.updated=Date.now();await putRec(r);if(r===CUR){lsSet(LIVE,CUR)}return true}
+let recT=null;function recodeSoon(){clearTimeout(recT);recT=setTimeout(async()=>{if(CUR&&await recode(CUR)){toast('اتغير تاريخ الاستلام ← كود جديد '+CUR.code);const el=document.querySelector('input[readonly][value^="RT-"]');if(el)el.value=CUR.code}},700)}
 async function newTruck(){const dt=cairoNowLocal();const ts=Date.now();const r={id:newId(),code:await uniqueCode(dt),status:'draft',archived:false,step:0,sv:3,h:{code:'',dt,variety:'',pack:'',packs:[]},c:{},sz:{},szp:{},wts:'',mode:'cnt',d:{},dn:{},notes:'',created:ts,updated:ts};r.h.code=r.code;RECS.push(r);await putRec(r);askPersist();go('#w/'+r.id+'/0')}
 
 /* حفظ فوري: نسخة متزامنة في localStorage + IndexedDB خلال لحظة */
@@ -345,7 +355,7 @@ document.addEventListener('input',e=>{const t=e.target,g=t.dataset.g;if(!g||!CUR
  if(g==='h'&&(k==='variety'||k==='pack'))return;
  if(g==='sz'){szSet(CUR,t.dataset.pack||packIdsOf(CUR)[0]||'',k,t.value)}
  else if(g==='h'||g==='d'||g==='dn'){CUR[g][k]=t.value}else if(g==='wts')CUR.wts=t.value;else if(g==='notes')CUR.notes=t.value;else return;
- touch();live()});
+ touch();live();if(g==='h'&&k==='dt')recodeSoon()});
 /* تغيير الصنف: الأعداد لمقاسات مش في الاختيار الجديد بتتحذّر. ما بتتمسحش. تغيير العبوة من togglePack. */
 document.addEventListener('change',e=>{const t=e.target;if(!CUR||t.dataset.g!=='h'||t.dataset.k!=='variety')return;
  const oldV=CUR.h.variety,nhV=t.value,oldG=grpOf(oldV),newG=grpOf(nhV);
@@ -360,7 +370,7 @@ document.addEventListener('change',e=>{const t=e.target;if(!CUR||t.dataset.g!=='
  if(lost.length&&!confirm('تنبيه: الأعداد دي مسجلة ومش موجودة في مقاسات الصنف الجديد:\n'+lost.join('\n')+'\n\nلو كمّلت مش هتتحسب (هتفضل محفوظة وترجع لو رجعت للاختيار القديم).\n\nتكمل؟')){t.value=oldV||'';return}
  CUR.h.variety=nhV;CUR.h.packs=keep;CUR.h.pack=keep[0]||'';touch();renderStep()});
 
-async function issue(){for(let i=0;i<6;i++){const e=validate(i);if(e){if(confirm('في خطوة «'+stepTitle(i)+'» لازم تتراجع:\n'+e.replace(/<[^>]+>.*$/s,'')+'\n\nتروح للخطوة دي؟'))goStep(i,1);return}}
+async function issue(){if(CUR&&await recode(CUR)){toast('كود العربية اتظبط على تاريخ الاستلام: '+CUR.code)}for(let i=0;i<6;i++){const e=validate(i);if(e){if(confirm('في خطوة «'+stepTitle(i)+'» لازم تتراجع:\n'+e.replace(/<[^>]+>.*$/s,'')+'\n\nتروح للخطوة دي؟'))goStep(i,1);return}}
  const R=compute(CUR);if(!n(CUR.h.net)&&!confirm('الوزن الصافي مش متسجل – التقرير هيطلع بدون كيلوجرامات. تكمل؟'))return;
  if(!confirm('إصدار تقرير '+CUR.code+'؟\nالقرار: '+R.dtxt))return;
  CUR.status='issued';CUR.issuedAt=Date.now();CUR.setSnap={...ST};CUR.r={exp:R.exp,dec:R.dec,loc:R.loc,net:R.net,decision:R.decision,avgW:R.avgW,ded:R.ded,N:R.N};CUR.updated=Date.now();
@@ -410,7 +420,7 @@ async function renderReport(r){const D=repData(r),{R,h,N,net}=D;let PH=[];try{PH
  $('#ls').textContent='';pdfFor(r)}
 function summaryText(r){const D=repData(r),{R,h,net}=D;return [`تقرير استلام سيارة خام ${r.code}`,`التاريخ: ${dateOf(r)}`,h.supplier&&`المورّد: ${h.supplier}`,h.plate&&`رقم العربية: ${h.plate}`,`الصنف: ${VN[h.variety]}${packLbl(r)?' · '+packLbl(r):''}`,net&&`الوزن الصافي: ${kgS(net)}`,`القرار: ${R.dtxt}`,`مسببات الأعفان: ${pc(R.dec)} · إجمالي العيوب: ${pc(D.totP)} · التصدير: ${pc(R.exp)}`,`العينة: ${R.N} ثمرة`,'العلا لفرز الحاصلات الزراعية'].filter(Boolean).join('\n')}
 function pdfFor(r){const key=r.id+':'+r.updated;if(PDFC.key===key&&PDFC.p)return PDFC.p;PDFC={key,done:null,p:null};PDFC.p=buildPdf(r).then(o=>{if(PDFC.key===key)PDFC.done=o;return o});PDFC.p.catch(e=>{console.error(e);PDFC.key=null});return PDFC.p}
-async function buildPdf(r){const pages=await renderPages(r);const jp=[];for(const c of pages){const b=await new Promise(ok=>c.toBlob(ok,'image/jpeg',0.86));jp.push({bytes:new Uint8Array(await b.arrayBuffer()),w:c.width,h:c.height})}return{blob:makePdf(jp),pages,name:r.code.replace(/[^\w-]/g,'_')+'.pdf'}}
+async function buildPdf(r){if(codeOff(r)){if(await recode(r))toast('كود العربية اتظبط على تاريخ الاستلام: '+r.code)}const pages=await renderPages(r);const jp=[];for(const c of pages){const b=await new Promise(ok=>c.toBlob(ok,'image/jpeg',0.86));jp.push({bytes:new Uint8Array(await b.arrayBuffer()),w:c.width,h:c.height})}return{blob:makePdf(jp),pages,name:r.code.replace(/[^\w-]/g,'_')+'.pdf'}}
 function dl(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},4000)}
 async function sharePdf(id){const r=recById(id);if(!r)return;let o=PDFC.done&&PDFC.key===r.id+':'+r.updated?PDFC.done:null;
  if(!o){toast('⏳ جاري تجهيز الـ PDF…');try{o=await pdfFor(r)}catch(e){return toast('تعذر تجهيز الـ PDF: '+(e.name||e))}}
