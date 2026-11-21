@@ -1,8 +1,8 @@
 'use strict';
-/* استلام الخام — العلا · v2.3.0 (كود العربية بتاريخ الاستلام؛ عبوات متعددة لنفس العربية؛ مقاسات كل عبوة لوحدها؛ التصدير مجمّع)
+/* استلام الخام — العلا · v2.4.0 (PDF: معاينة داخل البرنامج + إرسال واتساب مباشر بدون تنزيل؛ كود العربية بتاريخ الاستلام؛ عبوات متعددة لنفس العربية؛ مقاسات كل عبوة لوحدها؛ التصدير مجمّع)
    كل البيانات على الجهاز ده بس: سجلات العربيات في IndexedDB (rcv_data) + نسخة فورية للمسودة المفتوحة في localStorage،
    والصور في IndexedDB (rcv_photos). السجل القديم rcv_v1 لا يُمسح أبدًا (الإعدادات لسه فيه). */
-const APP_VER='2.3.0';
+const APP_VER='2.4.0';
 const KEY='rcv_v1',MIG='rcv_mig2',OPEN='rcv_open2',LIVE='rcv_live2',FB='rcv_fb2';
 const OR_SIZES=['أكبر من 36','36','40','48','56','64','72','80','88','100','113','أصغر من 113'];
 const VAR=[['navel','برتقال أبوسرة'],['valencia','برتقال صيفي (فالنسيا)'],['baladi','برتقال بلدي'],['lemon','ليمون'],['mclem','أفندي كلمنتينا'],['mfrem','أفندي فريمونت'],['murk','موركوت كيني'],['murs','موركوت إسباني']];
@@ -416,17 +416,16 @@ async function renderReport(r){const D=repData(r),{R,h,N,net}=D;let PH=[];try{PH
  ${PH.length?`<div class=card><h3 style="margin-top:0">الصور (${PH.length})</h3><div class=phg>${figs}</div></div>`:''}
  <p class=note>الحدود قيم افتراضية قابلة للتعديل في الإعدادات وليست مواصفة رسمية · كل ثمرة مسجلة تحت أكبر عيب فيها · صدر ${fmtTs(r.issuedAt)}</p>
  <div id=shareMsg></div>
- <div class=rbtns><div><button id=bShare onclick="sharePdf('${r.id}')">📤 مشاركة</button><button class=ol onclick="downloadPdf('${r.id}')">⬇ PDF</button><button class=ol onclick="printPdf('${r.id}')">🖨 طباعة</button><button class=ol onclick="waText('${r.id}')">واتساب</button><button class=gr onclick="reopen('${r.id}')">✏️ تعديل</button></div></div>`;
+ <div class=rbtns><div><button id=bShare onclick="sharePdf('${r.id}')">📤 PDF / واتساب</button><button class=ol onclick="downloadPdf('${r.id}')">⬇ تحميل PDF</button><button class=ol onclick="printPdf('${r.id}')">🖨 طباعة</button><button class=ol onclick="waText('${r.id}')">واتساب</button><button class=gr onclick="reopen('${r.id}')">✏️ تعديل</button></div></div>`;
  $('#ls').textContent='';pdfFor(r)}
 function summaryText(r){const D=repData(r),{R,h,net}=D;return [`تقرير استلام سيارة خام ${r.code}`,`التاريخ: ${dateOf(r)}`,h.supplier&&`المورّد: ${h.supplier}`,h.plate&&`رقم العربية: ${h.plate}`,`الصنف: ${VN[h.variety]}${packLbl(r)?' · '+packLbl(r):''}`,net&&`الوزن الصافي: ${kgS(net)}`,`القرار: ${R.dtxt}`,`مسببات الأعفان: ${pc(R.dec)} · إجمالي العيوب: ${pc(D.totP)} · التصدير: ${pc(R.exp)}`,`العينة: ${R.N} ثمرة`,'العلا لفرز الحاصلات الزراعية'].filter(Boolean).join('\n')}
 function pdfFor(r){const key=r.id+':'+r.updated;if(PDFC.key===key&&PDFC.p)return PDFC.p;PDFC={key,done:null,p:null};PDFC.p=buildPdf(r).then(o=>{if(PDFC.key===key)PDFC.done=o;return o});PDFC.p.catch(e=>{console.error(e);PDFC.key=null});return PDFC.p}
-async function buildPdf(r){if(codeOff(r)){if(await recode(r))toast('كود العربية اتظبط على تاريخ الاستلام: '+r.code)}const pages=await renderPages(r);const jp=[];for(const c of pages){const b=await new Promise(ok=>c.toBlob(ok,'image/jpeg',0.86));jp.push({bytes:new Uint8Array(await b.arrayBuffer()),w:c.width,h:c.height})}return{blob:makePdf(jp),pages,name:r.code.replace(/[^\w-]/g,'_')+'.pdf'}}
+async function buildPdf(r){if(codeOff(r)){if(await recode(r))toast('كود العربية اتظبط على تاريخ الاستلام: '+r.code)}const pages=await renderPages(r);const jp=[];for(const c of pages){const b=await new Promise(ok=>c.toBlob(ok,'image/jpeg',0.86));jp.push({bytes:new Uint8Array(await b.arrayBuffer()),w:c.width,h:c.height})}return{blob:makePdf(jp),pages,name:'تقرير استلام العلا — '+r.code.replace(/[^\w-]/g,'_')+'.pdf'}}
 function dl(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},4000)}
+/* PDF / واتساب: in-app preview; the share tap (WhatsApp) happens inside the preview. Nothing is downloaded automatically. */
 async function sharePdf(id){const r=recById(id);if(!r)return;let o=PDFC.done&&PDFC.key===r.id+':'+r.updated?PDFC.done:null;
  if(!o){toast('⏳ جاري تجهيز الـ PDF…');try{o=await pdfFor(r)}catch(e){return toast('تعذر تجهيز الـ PDF: '+(e.name||e))}}
- const file=new File([o.blob],o.name,{type:'application/pdf'});
- if(navigator.canShare&&navigator.canShare({files:[file]})){try{await navigator.share({files:[file],title:'تقرير '+r.code,text:'تقرير استلام '+r.code});return}catch(e){if(e.name==='AbortError')return;if(e.name==='NotAllowedError'){toast('الـ PDF جاهز – اضغط «مشاركة PDF» تاني',4000);return}}}
- dl(o.blob,o.name);$('#shareMsg').innerHTML=`<div class=warnb>المشاركة المباشرة مش مدعومة هنا – اتنزل الملف ${esc(o.name)}. ابعته من واتساب كمرفق، أو ابعت ملخص نصي: <button class=sm onclick="waText('${r.id}')">واتساب نص</button></div>`}
+ PdfShare.open(o.blob,o.name,{title:'تقرير استلام '+r.code,heading:'معاينة تقرير الاستلام'})}
 async function downloadPdf(id){const r=recById(id);try{const o=await pdfFor(r);dl(o.blob,o.name)}catch(e){toast('تعذر تجهيز الـ PDF')}}
 function waText(id){const r=recById(id);window.open('https://wa.me/?text='+encodeURIComponent(summaryText(r)),'_blank')}
 async function printPdf(id){const r=recById(id);toast('⏳ جاري التجهيز للطباعة…');let o;try{o=await pdfFor(r)}catch(e){return toast('تعذر التجهيز')}
